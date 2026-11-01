@@ -15,7 +15,7 @@ Notable changes. Format based on
 - English text that was missing when an image was saved is filled in by a later
   run while Bing still lists the image, matched by the image's `bing:id`.
 - `bingkit.swift info` reports an image's `bing:id` and whether it has English
-  text; `tag` keeps a file's existing `bing:` namespace.
+  text.
 
 ## [0.1.0] - 2026-11-01
 
