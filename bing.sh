@@ -23,6 +23,9 @@ BINGKIT="$HERE/bingkit.swift"
 load_config
 DEST_DIR="$(collection_dir "${1:-}")" || exit 1
 SEP=$'\037' # field separator for the English text table
+# English text appears about 15 hours after the Chinese text. A new image
+# waits for it this long at most; after that it is saved without English.
+WAIT_HOURS=24
 
 if command -v plutil >/dev/null 2>&1; then
     JSON_TOOL=plutil
@@ -89,6 +92,12 @@ have_date() {
 
 fetch() { curl -fsSL --retry 3 -o "$1" "$2"; }
 
+# Seconds since 1970 for a UTC time YYYYMMDDHHMM (BSD date, then GNU date).
+epoch_utc() {
+    date -u -j -f '%Y%m%d%H%M%S' "${1}00" +%s 2>/dev/null ||
+        date -u -d "${1:0:8} ${1:8:2}:${1:10:2}" +%s 2>/dev/null
+}
+
 # Dates already downloaded, one YYYY-MM-DD per line, so an image you
 # deleted is not downloaded again. Only Bing's window matters (15 days); older
 # lines are dropped at the end of each run.
@@ -129,6 +138,7 @@ done
 # English text by image ID (the English market's date can be one day later).
 en_text="$work_dir/en.txt"
 : >"$en_text"
+en_ok=0 # the newest English list arrived, so a missing image is not yet there
 if [ "$XMP" = 1 ]; then
     for page in $PAGES; do
         list="$work_dir/en-$page.json"
@@ -136,6 +146,7 @@ if [ "$XMP" = 1 ]; then
             echo "warning: failed to fetch English text (idx=$page)" >&2
             continue
         fi
+        [ "$page" = 0 ] && en_ok=1
         j=0
         while [ "$j" -lt "$MAX_ITEMS" ]; do
             url_base="$(json_get "$list" "images.$j.urlbase" 2>/dev/null)" || break
@@ -147,6 +158,8 @@ if [ "$XMP" = 1 ]; then
         done
     done
 fi
+has_english() { awk -F "$SEP" -v id="$1" '$1 == id { found = 1 } END { exit !found }' "$en_text"; }
+now="$(date -u +%s)"
 
 images=0
 for list in $lists; do
@@ -157,16 +170,29 @@ for list in $lists; do
         copyright="$(json_get "$list" "images.$i.copyright")"
         title="$(json_get "$list" "images.$i.title" 2>/dev/null)" || title=""
         link="$(json_get "$list" "images.$i.copyrightlink" 2>/dev/null)" || link=""
+        published="$(json_get "$list" "images.$i.fullstartdate" 2>/dev/null)" || published=""
         i=$((i + 1))
         images=$((images + 1))
 
         date="${start_date:0:4}-${start_date:4:2}-${start_date:6:2}"
+        printf '%s\n' "$date" >>"$work_dir/dates.txt"
         if recorded "$date"; then
             continue
         fi
         if have_date "$DEST_DIR" "$date"; then
             record "$date"
             continue
+        fi
+
+        # Not yet in English: leave it for a later run (not downloaded, not
+        # recorded) until it is WAIT_HOURS old.
+        id="$(image_id "$url_base")"
+        if [ "$XMP" = 1 ] && [ "$en_ok" = 1 ] && ! has_english "$id"; then
+            published="$(epoch_utc "$published" || true)"
+            if [ -n "$published" ] && [ $((now - published)) -lt $((WAIT_HOURS * 3600)) ]; then
+                echo "note: $date waits for its English text (published $(((now - published) / 3600)) h ago)" >&2
+                continue
+            fi
         fi
 
         url="$HOST${url_base}_UHD.jpg"
@@ -181,7 +207,6 @@ for list in $lists; do
         fi
 
         if [ "$XMP" = 1 ]; then
-            id="$(image_id "$url_base")"
             title_en="" desc_en=""
             IFS="$SEP" read -r _ title_en desc_en < <(awk -F "$SEP" -v id="$id" '$1 == id { print; exit }' "$en_text") || true
             split_copyright "$copyright"
@@ -204,6 +229,41 @@ if [ -f "$RECORD" ]; then
     cutoff="$(date -v-16d +%Y-%m-%d 2>/dev/null || date -d '16 days ago' +%Y-%m-%d)"
     awk -v cutoff="$cutoff" '$0 >= cutoff' "$RECORD" | LC_ALL=C sort -u >"$work_dir/record"
     mv -f "$work_dir/record" "$RECORD"
+fi
+
+# Fill in English text that was not out yet when an image was saved (for
+# example after the 24-hour wait), as long as Bing still lists the image.
+# The match is by the image's own bing:id, never by date, so Chinese and
+# English always describe the same picture. Images without XMP are left alone.
+if [ "$XMP" = 1 ] && [ -s "$en_text" ] && [ -f "$work_dir/dates.txt" ]; then
+    candidates=()
+    while IFS= read -r date; do
+        for f in "$DEST_DIR/$date "*.jpg; do
+            [ -e "$f" ] && candidates+=("$f")
+        done
+    done < <(LC_ALL=C sort -u "$work_dir/dates.txt")
+    if [ "${#candidates[@]}" -gt 0 ]; then
+        swift "$BINGKIT" info "${candidates[@]}" >"$work_dir/info.txt" 2>/dev/null || true
+        tab=$'\t'
+        while IFS= read -r line; do
+            id="${line%%"$tab"*}"
+            rest="${line#*"$tab"}"
+            has_en="${rest%%"$tab"*}"
+            path="${rest#*"$tab"}"
+            [ -n "$id" ] && [ "$has_en" = 0 ] || continue
+            title_en="" desc_en=""
+            IFS="$SEP" read -r _ title_en desc_en < <(awk -F "$SEP" -v id="$id" '$1 == id { print; exit }' "$en_text") || true
+            [ -n "$title_en$desc_en" ] || continue
+            echo "Adding English text -> $path"
+            if swift "$BINGKIT" tag "$path" "$work_dir/filled.jpg" \
+                "bing:titleEn=$title_en" "bing:descriptionEn=$desc_en"; then
+                mv -f "$work_dir/filled.jpg" "$path"
+            else
+                echo "warning: could not add English text to $path" >&2
+                rm -f "$work_dir/filled.jpg"
+            fi
+        done <"$work_dir/info.txt"
+    fi
 fi
 
 # A list we cannot parse (an HTML page, broken JSON) ends the loop at once;

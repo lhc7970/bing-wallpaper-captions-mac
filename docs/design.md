@@ -31,6 +31,23 @@ it identifies the image. `ensearch=1` on the same host returns the English
 text. The English market's date can be a day later, so English text is
 matched by image ID, not by date.
 
+Timing, checked over 15 days: each image appears in Chinese at 16:00 UTC (00:00
+China time) and in English exactly **15 hours later** (07:00 UTC, 15:00 China
+time). So `bing.sh` holds back a new image whose English text is not out yet:
+it is neither downloaded nor recorded, and a later run picks it up. After 24
+hours it is saved without English, in case an image never reaches the English
+market. Scheduling the daily run after 07:00 UTC means it rarely has to wait;
+the rule covers runs at login or wake-up. A second daily run before 16:00 UTC
+(22:00 China time) catches a late English text on the same day.
+
+Last, a run fills in English text that was missing when an image was saved,
+for every image Bing still lists. `bingkit.swift info` reads each candidate's
+`bing:id` and whether it has English; the English text is taken by that ID
+only, so a date mix-up or a market showing a different picture cannot pair
+the wrong texts. Images without XMP are skipped. `tag` merges into the
+existing XMP and reuses the file's own `bing:` namespace, so files written
+with an older namespace do not end up with two.
+
 ## Identity: one image per date
 
 An image is skipped if the folder already has **any** image of its date: a file

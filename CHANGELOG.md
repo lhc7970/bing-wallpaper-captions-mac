@@ -3,6 +3,17 @@
 Notable changes. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- A new image waits (up to 24 hours) until its English text is published,
+  about 15 hours after the Chinese text, so it is not saved without English.
+  The suggested daily times are now 16:00 and 22:00 China time.
+- English text that was missing when an image was saved is filled in by a later
+  run while Bing still lists the image, matched by the image's `bing:id`.
+- `bingkit.swift info` reports an image's `bing:id` and whether it has English
+  text; `tag` keeps a file's existing `bing:` namespace.
+
 ## [0.1.0] - 2026-11-01
 
 First public version.
