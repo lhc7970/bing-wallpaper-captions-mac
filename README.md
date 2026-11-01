@@ -97,7 +97,13 @@ EOF
   Chinese at 00:00 China time (16:00 UTC the day before), and the English text
   15 hours later. A new image whose English text is not out yet is left for a
   later run, for up to 24 hours; after that it is saved with Chinese text only.
-  This is why the job below runs at 16:00 China time.
+  This is why the job below runs at 16:00 China time, with a second run at
+  22:00 that catches a late day before the next image appears.
+- **Missing English is filled in later.** While Bing still lists an image (15
+  days), a later run adds English text that was not out when the image was
+  saved. The match is by the image's own ID in its XMP (`bing:id`), never by
+  date, so Chinese and English always describe the same picture. Pixels do not
+  change. Images without XMP are left alone.
 - **Downloads are atomic.** Images go to a temporary folder first, so iCloud
   never syncs a half-written file. Failed downloads leave nothing behind and
   are retried on the next run.
@@ -134,10 +140,10 @@ paths:
         <string>/Users/YOU/bing-wallpaper-captions-mac/bing.sh; /Users/YOU/bing-wallpaper-captions-mac/rotation.sh</string>
     </array>
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key><integer>16</integer>
-        <key>Minute</key><integer>0</integer>
-    </dict>
+    <array>
+        <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
     <key>RunAtLoad</key><true/>
     <key>StandardOutPath</key><string>/tmp/bing-wallpapers.log</string>
     <key>StandardErrorPath</key><string>/tmp/bing-wallpapers.log</string>
@@ -153,18 +159,20 @@ launchctl kickstart gui/$(id -u)/local.bing-wallpapers                          
 launchctl bootout gui/$(id -u)/local.bing-wallpapers                                  # disable
 ```
 
-The time is local: 16:00 suits China time (UTC+8). Elsewhere, pick a time
-after 07:00 UTC, when the English text is out.
+The times are local: 16:00 and 22:00 suit China time (UTC+8). Elsewhere, pick
+a first time after 07:00 UTC, when the English text is out, and a second one
+before 16:00 UTC, when the next image appears. Extra runs are harmless: each
+run only does what is still missing.
 
-This is a user job. It runs at login, then daily at 16:00 while you are logged
-in (also when the screen is locked). If the Mac was asleep at 16:00, it runs
+This is a user job. It runs at login, then at the times above while you are
+logged in (also when the screen is locked). If the Mac was asleep, it runs
 when the Mac wakes. It does not run while nobody is logged in.
 
 ### One Mac downloads, every Mac shows
 
 Run `bing.sh; rotation.sh` on **one** Mac that is usually on. On every other
 Mac that uses the same iCloud collection, run only `rotation.sh`, a bit later
-(for example at 16:30), so iCloud has synced the new image first. Two Macs
+(for example at 16:30 and 22:30), so iCloud has synced the new image first. Two Macs
 downloading at once would create iCloud conflict copies.
 
 ### Permission

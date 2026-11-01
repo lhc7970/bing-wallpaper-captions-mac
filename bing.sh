@@ -175,6 +175,7 @@ for list in $lists; do
         images=$((images + 1))
 
         date="${start_date:0:4}-${start_date:4:2}-${start_date:6:2}"
+        printf '%s\n' "$date" >>"$work_dir/dates.txt"
         if recorded "$date"; then
             continue
         fi
@@ -228,6 +229,41 @@ if [ -f "$RECORD" ]; then
     cutoff="$(date -v-16d +%Y-%m-%d 2>/dev/null || date -d '16 days ago' +%Y-%m-%d)"
     awk -v cutoff="$cutoff" '$0 >= cutoff' "$RECORD" | LC_ALL=C sort -u >"$work_dir/record"
     mv -f "$work_dir/record" "$RECORD"
+fi
+
+# Fill in English text that was not out yet when an image was saved (for
+# example after the 24-hour wait), as long as Bing still lists the image.
+# The match is by the image's own bing:id, never by date, so Chinese and
+# English always describe the same picture. Images without XMP are left alone.
+if [ "$XMP" = 1 ] && [ -s "$en_text" ] && [ -f "$work_dir/dates.txt" ]; then
+    candidates=()
+    while IFS= read -r date; do
+        for f in "$DEST_DIR/$date "*.jpg; do
+            [ -e "$f" ] && candidates+=("$f")
+        done
+    done < <(LC_ALL=C sort -u "$work_dir/dates.txt")
+    if [ "${#candidates[@]}" -gt 0 ]; then
+        swift "$BINGKIT" info "${candidates[@]}" >"$work_dir/info.txt" 2>/dev/null || true
+        tab=$'\t'
+        while IFS= read -r line; do
+            id="${line%%"$tab"*}"
+            rest="${line#*"$tab"}"
+            has_en="${rest%%"$tab"*}"
+            path="${rest#*"$tab"}"
+            [ -n "$id" ] && [ "$has_en" = 0 ] || continue
+            title_en="" desc_en=""
+            IFS="$SEP" read -r _ title_en desc_en < <(awk -F "$SEP" -v id="$id" '$1 == id { print; exit }' "$en_text") || true
+            [ -n "$title_en$desc_en" ] || continue
+            echo "Adding English text -> $path"
+            if swift "$BINGKIT" tag "$path" "$work_dir/filled.jpg" \
+                "bing:titleEn=$title_en" "bing:descriptionEn=$desc_en"; then
+                mv -f "$work_dir/filled.jpg" "$path"
+            else
+                echo "warning: could not add English text to $path" >&2
+                rm -f "$work_dir/filled.jpg"
+            fi
+        done <"$work_dir/info.txt"
+    fi
 fi
 
 # A list we cannot parse (an HTML page, broken JSON) ends the loop at once;

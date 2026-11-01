@@ -6,6 +6,11 @@
 //       Copy a JPEG and add XMP fields, without re-encoding the image.
 //       Keys: dc:title dc:description dc:rights photoshop:DateCreated
 //             bing:id bing:link bing:titleEn bing:descriptionEn
+//       Fields already in the file are kept. If the file already uses a
+//       namespace for `bing:` (an older one), the new fields join it.
+//   info <in.jpg>…
+//       Print one line per image: bing:id, TAB, 1 if bing:titleEn is set
+//       (else 0), TAB, the path. bing:id is empty for images without XMP.
 //   caption <out-dir> <in.jpg>…
 //       Write a copy of each image with its caption drawn bottom right.
 //       Text comes from the XMP written by `tag`; images without it use
@@ -36,6 +41,8 @@ func warn(_ message: String) {
 func usage() -> Never {
     warn("usage: swift bingkit.swift tag <in.jpg> <out.jpg> <key=value>...")
     warn("       swift bingkit.swift caption <out-dir> <in.jpg>...")
+    warn("       swift bingkit.swift info <in.jpg>...")
+    warn("       swift bingkit.swift screens")
     exit(2)
 }
 
@@ -51,8 +58,15 @@ func tag(_ input: String, _ output: String, _ pairs: [String]) -> Bool {
               URL(fileURLWithPath: output) as CFURL, type, 1, nil)
     else { warn("bingkit: cannot read \(input)"); return false }
 
+    // Reuse the file's own `bing:` namespace, so one file never has two.
+    var namespace = bingNamespace
+    if let existing = CGImageSourceCopyMetadataAtIndex(source, 0, nil),
+       let idTag = CGImageMetadataCopyTagWithPath(existing, nil, "bing:id" as CFString),
+       let uri = CGImageMetadataTagCopyNamespace(idTag) {
+        namespace = uri
+    }
     let metadata = CGImageMetadataCreateMutable()
-    guard CGImageMetadataRegisterNamespaceForPrefix(metadata, bingNamespace, bingPrefix, nil)
+    guard CGImageMetadataRegisterNamespaceForPrefix(metadata, namespace, bingPrefix, nil)
     else { warn("bingkit: cannot register XMP namespace"); return false }
     for pair in pairs {
         guard let eq = pair.firstIndex(of: "=") else { warn("bingkit: bad field \(pair)"); return false }
@@ -200,6 +214,19 @@ switch command {
 case "tag":
     guard args.count >= 3 else { usage() }
     exit(tag(args[1], args[2], Array(args.dropFirst(3))) ? 0 : 1)
+case "info":
+    guard args.count >= 2 else { usage() }
+    var ok = true
+    for input in args.dropFirst() {
+        guard let source = imageSource(input) else { warn("bingkit: cannot read \(input)"); ok = false; continue }
+        var id = "", english = "0"
+        if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) {
+            id = xmpString(metadata, "bing:id")
+            english = xmpString(metadata, "bing:titleEn").isEmpty ? "0" : "1"
+        }
+        print("\(id)\t\(english)\t\(input)")
+    }
+    exit(ok ? 0 : 1)
 case "screens":
     // Screens narrower than 4:3 (portrait) would push the caption to the
     // middle; they are left out.
