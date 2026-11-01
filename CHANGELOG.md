@@ -17,6 +17,11 @@ Notable changes. Format based on
 - `bingkit.swift info` reports an image's `bing:id` and whether it has English
   text.
 
+### Fixed
+- `bingkit.swift tag` no longer rejects a field whose value starts with a
+  joining character such as U+200C (zero-width non-joiner); such an image was
+  saved without XMP.
+
 ## [0.1.0] - 2026-11-01
 
 First public version.

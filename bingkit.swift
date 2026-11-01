@@ -61,8 +61,11 @@ func tag(_ input: String, _ output: String, _ pairs: [String]) -> Bool {
     guard CGImageMetadataRegisterNamespaceForPrefix(metadata, bingNamespace, bingPrefix, nil)
     else { warn("bingkit: cannot register XMP namespace"); return false }
     for pair in pairs {
-        guard let eq = pair.firstIndex(of: "=") else { warn("bingkit: bad field \(pair)"); return false }
-        let key = String(pair[..<eq]), value = String(pair[pair.index(after: eq)...])
+        // Split on Unicode scalars: as Characters, "=" followed by a joiner
+        // such as U+200C forms one cluster and would not be found.
+        let scalars = pair.unicodeScalars
+        guard let eq = scalars.firstIndex(of: "=") else { warn("bingkit: bad field \(pair)"); return false }
+        let key = String(scalars[..<eq]), value = String(scalars[scalars.index(after: eq)...])
         if value.isEmpty { continue }
         guard CGImageMetadataSetValueWithPath(metadata, nil, key as CFString, value as CFString)
         else { warn("bingkit: cannot set \(key)"); return false }
