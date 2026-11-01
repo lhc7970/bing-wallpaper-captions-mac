@@ -3,6 +3,13 @@
 Notable changes. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- A new image waits (up to 24 hours) until its English text is published,
+  about 15 hours after the Chinese text, so it is not saved without English.
+  The suggested daily time is now 16:00 China time (after 07:00 UTC).
+
 ## [0.1.0] - 2026-11-01
 
 First public version.

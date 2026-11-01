@@ -93,6 +93,11 @@ EOF
 - **Deleted images stay deleted.** `.bing-downloaded` in the collection folder
   lists the dates downloaded in the last 16 days. To get a deleted image back,
   remove its line while Bing still offers it.
+- **New images wait for their English text.** Bing publishes a day's image in
+  Chinese at 00:00 China time (16:00 UTC the day before), and the English text
+  15 hours later. A new image whose English text is not out yet is left for a
+  later run, for up to 24 hours; after that it is saved with Chinese text only.
+  This is why the job below runs at 16:00 China time.
 - **Downloads are atomic.** Images go to a temporary folder first, so iCloud
   never syncs a half-written file. Failed downloads leave nothing behind and
   are retried on the next run.
@@ -130,7 +135,7 @@ paths:
     </array>
     <key>StartCalendarInterval</key>
     <dict>
-        <key>Hour</key><integer>9</integer>
+        <key>Hour</key><integer>16</integer>
         <key>Minute</key><integer>0</integer>
     </dict>
     <key>RunAtLoad</key><true/>
@@ -148,15 +153,18 @@ launchctl kickstart gui/$(id -u)/local.bing-wallpapers                          
 launchctl bootout gui/$(id -u)/local.bing-wallpapers                                  # disable
 ```
 
-This is a user job. It runs at login, then daily at 9:00 while you are logged
-in (also when the screen is locked). If the Mac was asleep at 9:00, it runs
+The time is local: 16:00 suits China time (UTC+8). Elsewhere, pick a time
+after 07:00 UTC, when the English text is out.
+
+This is a user job. It runs at login, then daily at 16:00 while you are logged
+in (also when the screen is locked). If the Mac was asleep at 16:00, it runs
 when the Mac wakes. It does not run while nobody is logged in.
 
 ### One Mac downloads, every Mac shows
 
 Run `bing.sh; rotation.sh` on **one** Mac that is usually on. On every other
 Mac that uses the same iCloud collection, run only `rotation.sh`, a bit later
-(for example at 9:30), so iCloud has synced the new image first. Two Macs
+(for example at 16:30), so iCloud has synced the new image first. Two Macs
 downloading at once would create iCloud conflict copies.
 
 ### Permission

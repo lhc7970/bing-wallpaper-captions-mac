@@ -23,6 +23,9 @@ BINGKIT="$HERE/bingkit.swift"
 load_config
 DEST_DIR="$(collection_dir "${1:-}")" || exit 1
 SEP=$'\037' # field separator for the English text table
+# English text appears about 15 hours after the Chinese text. A new image
+# waits for it this long at most; after that it is saved without English.
+WAIT_HOURS=24
 
 if command -v plutil >/dev/null 2>&1; then
     JSON_TOOL=plutil
@@ -89,6 +92,12 @@ have_date() {
 
 fetch() { curl -fsSL --retry 3 -o "$1" "$2"; }
 
+# Seconds since 1970 for a UTC time YYYYMMDDHHMM (BSD date, then GNU date).
+epoch_utc() {
+    date -u -j -f '%Y%m%d%H%M%S' "${1}00" +%s 2>/dev/null ||
+        date -u -d "${1:0:8} ${1:8:2}:${1:10:2}" +%s 2>/dev/null
+}
+
 # Dates already downloaded, one YYYY-MM-DD per line, so an image you
 # deleted is not downloaded again. Only Bing's window matters (15 days); older
 # lines are dropped at the end of each run.
@@ -129,6 +138,7 @@ done
 # English text by image ID (the English market's date can be one day later).
 en_text="$work_dir/en.txt"
 : >"$en_text"
+en_ok=0 # the newest English list arrived, so a missing image is not yet there
 if [ "$XMP" = 1 ]; then
     for page in $PAGES; do
         list="$work_dir/en-$page.json"
@@ -136,6 +146,7 @@ if [ "$XMP" = 1 ]; then
             echo "warning: failed to fetch English text (idx=$page)" >&2
             continue
         fi
+        [ "$page" = 0 ] && en_ok=1
         j=0
         while [ "$j" -lt "$MAX_ITEMS" ]; do
             url_base="$(json_get "$list" "images.$j.urlbase" 2>/dev/null)" || break
@@ -147,6 +158,8 @@ if [ "$XMP" = 1 ]; then
         done
     done
 fi
+has_english() { awk -F "$SEP" -v id="$1" '$1 == id { found = 1 } END { exit !found }' "$en_text"; }
+now="$(date -u +%s)"
 
 images=0
 for list in $lists; do
@@ -157,6 +170,7 @@ for list in $lists; do
         copyright="$(json_get "$list" "images.$i.copyright")"
         title="$(json_get "$list" "images.$i.title" 2>/dev/null)" || title=""
         link="$(json_get "$list" "images.$i.copyrightlink" 2>/dev/null)" || link=""
+        published="$(json_get "$list" "images.$i.fullstartdate" 2>/dev/null)" || published=""
         i=$((i + 1))
         images=$((images + 1))
 
@@ -167,6 +181,17 @@ for list in $lists; do
         if have_date "$DEST_DIR" "$date"; then
             record "$date"
             continue
+        fi
+
+        # Not yet in English: leave it for a later run (not downloaded, not
+        # recorded) until it is WAIT_HOURS old.
+        id="$(image_id "$url_base")"
+        if [ "$XMP" = 1 ] && [ "$en_ok" = 1 ] && ! has_english "$id"; then
+            published="$(epoch_utc "$published" || true)"
+            if [ -n "$published" ] && [ $((now - published)) -lt $((WAIT_HOURS * 3600)) ]; then
+                echo "note: $date waits for its English text (published $(((now - published) / 3600)) h ago)" >&2
+                continue
+            fi
         fi
 
         url="$HOST${url_base}_UHD.jpg"
@@ -181,7 +206,6 @@ for list in $lists; do
         fi
 
         if [ "$XMP" = 1 ]; then
-            id="$(image_id "$url_base")"
             title_en="" desc_en=""
             IFS="$SEP" read -r _ title_en desc_en < <(awk -F "$SEP" -v id="$id" '$1 == id { print; exit }' "$en_text") || true
             split_copyright "$copyright"
