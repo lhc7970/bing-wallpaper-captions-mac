@@ -6,6 +6,9 @@ Notable changes. Format based on
 ## [Unreleased]
 
 ### Changed
+- The random older images in the rotation folder are picked once per day (a
+  hash of the date and the file name), not on every run, so the extra daily
+  runs no longer replace them each time.
 - A new image waits (up to 24 hours) until its English text is published,
   about 15 hours after the Chinese text, so it is not saved without English.
   The suggested daily times are now 16:00 and 22:00 China time.

@@ -66,7 +66,17 @@ if [ "$RECENT" -gt 0 ]; then
     tail -n "$RECENT" "$all" >>"$want"
 fi
 if [ "$older" -gt 0 ] && [ "$RANDOM_PICK" -gt 0 ]; then
-    head -n "$older" "$all" | sort -R >"$work_dir/older.txt"
+    # The older images change once a day, not on every run: each one is ranked
+    # by a hash of today's date and its name. Every run on the same day, and
+    # every Mac, picks the same ones, even if the collection gains an image in
+    # between. (C locale: the hash works on bytes, whatever the caller's locale.)
+    head -n "$older" "$all" | LC_ALL=C awk -v seed="$(date +%Y-%m-%d)" '
+        BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
+        {
+            s = seed ":" $0; h = 7
+            for (i = 1; i <= length(s); i++) h = (h * 31 + ord[substr(s, i, 1)]) % 2147483647
+            printf "%010d\t%s\n", h, $0
+        }' | LC_ALL=C sort | cut -f 2- >"$work_dir/older.txt"
     head -n "$RANDOM_PICK" "$work_dir/older.txt" >>"$want"
 fi
 
