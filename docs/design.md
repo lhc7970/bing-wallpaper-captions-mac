@@ -107,6 +107,13 @@ declares.
 - **Contents:** the 8 newest images plus 8 random older ones, each a copy with
   its caption drawn on it. On a normal day 7 of the newest stay as they are,
   one new image is drawn, and the 8 older ones are picked again.
+- **One random pick per day:** the job runs more than once a day (16:00,
+  22:00, at login). Each older image is ranked by a hash of the date and its
+  name, so every run on the same day picks the same 8 and rewrites nothing.
+  It also stays stable when the collection gains an image during the day, and
+  every Mac picks the same ones. Changing the folder on every run left System
+  Settings, open for a day, showing many missing thumbnails; it appears to
+  keep an older list of the folder.
 - **Safe update:** new copies are drawn first and moved in. Then copies that
   are no longer wanted are removed. The folder is never emptied, because the
   wallpaper is using it.

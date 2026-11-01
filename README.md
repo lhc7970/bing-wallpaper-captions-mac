@@ -109,7 +109,12 @@ EOF
   are retried on the next run.
 - **The rotation folder is generated.** Copies that are still wanted are kept,
   and are redrawn only when their original, the caption style or the screen
-  changes. Do not keep your own files in that folder.
+  changes. The random older images are picked once per day: every run on the
+  same day keeps the same ones. Do not keep your own files in that folder.
+- **System Settings may show missing thumbnails** for copies that were
+  replaced while its Wallpaper pane stayed open; it appears to keep the list it
+  read earlier. Quitting and reopening System Settings is the first thing to
+  try.
 
 Exit codes:
 
