@@ -6,8 +6,7 @@
 //       Copy a JPEG and add XMP fields, without re-encoding the image.
 //       Keys: dc:title dc:description dc:rights photoshop:DateCreated
 //             bing:id bing:link bing:titleEn bing:descriptionEn
-//       Fields already in the file are kept. If the file already uses a
-//       namespace for `bing:` (an older one), the new fields join it.
+//       Fields already in the file are kept.
 //   info <in.jpg>…
 //       Print one line per image: bing:id, TAB, 1 if bing:titleEn is set
 //       (else 0), TAB, the path. bing:id is empty for images without XMP.
@@ -58,15 +57,8 @@ func tag(_ input: String, _ output: String, _ pairs: [String]) -> Bool {
               URL(fileURLWithPath: output) as CFURL, type, 1, nil)
     else { warn("bingkit: cannot read \(input)"); return false }
 
-    // Reuse the file's own `bing:` namespace, so one file never has two.
-    var namespace = bingNamespace
-    if let existing = CGImageSourceCopyMetadataAtIndex(source, 0, nil),
-       let idTag = CGImageMetadataCopyTagWithPath(existing, nil, "bing:id" as CFString),
-       let uri = CGImageMetadataTagCopyNamespace(idTag) {
-        namespace = uri
-    }
     let metadata = CGImageMetadataCreateMutable()
-    guard CGImageMetadataRegisterNamespaceForPrefix(metadata, namespace, bingPrefix, nil)
+    guard CGImageMetadataRegisterNamespaceForPrefix(metadata, bingNamespace, bingPrefix, nil)
     else { warn("bingkit: cannot register XMP namespace"); return false }
     for pair in pairs {
         guard let eq = pair.firstIndex(of: "=") else { warn("bingkit: bad field \(pair)"); return false }
