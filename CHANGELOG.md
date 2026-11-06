@@ -5,6 +5,10 @@ Notable changes. Format based on
 
 ## [Unreleased]
 
+### Added
+- The README shows a captioned sample, Bing's Webb image of the Pillars of
+  Creation (CC BY 4.0, credited below it), in place of the plain-text caption.
+
 ### Changed
 - The random older images in the rotation folder are picked once per day (a
   hash of the date and the file name), not on every run, so the extra daily

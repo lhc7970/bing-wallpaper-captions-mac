@@ -3,12 +3,14 @@
 Collect the Bing image of the day on a Mac, and rotate through it on the
 desktop with its description drawn on the picture, in Chinese and English:
 
-```
-往昔帝国的幽影 · Ghosts of empires past
-圣巴尔多禄茂教堂，法兰克福，德国
-St. Bartholomew's Cathedral in Frankfurt, Germany
-2026-10-30 · © AlxeyPnferov/Getty Images
-```
+![Bing's image for 2025-10-08, the Pillars of Creation seen by Webb, with its caption drawn bottom left](docs/sample.jpg)
+
+<sub>Bing's image for 2025-10-08 as the desktop shows it, resized to
+1920×1080. Image: NASA, ESA, CSA, STScI, J. DePasquale (STScI), A. Pagan
+(STScI), A. M. Koekemoer (STScI), via
+[ESA/Webb](https://esawebb.org/images/pillarsofcreation_composite/),
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Cropped by Bing;
+caption added by this project.</sub>
 
 - **`bing.sh`** downloads the UHD (3840×2160) images of the last 15 days into
   a collection folder in iCloud Drive. It skips dates it already has and never brings back an
@@ -23,8 +25,8 @@ St. Bartholomew's Cathedral in Frankfurt, Germany
 - One Mac downloads; every Mac signed in to the same iCloud account shows the
   collection.
 
-Not affiliated with Microsoft. This repository contains code only, no images.
-See [Images and terms](#images-and-terms).
+Not affiliated with Microsoft. Apart from the sample above, this repository
+contains code only. See [Images and terms](#images-and-terms).
 
 ## Requirements
 
@@ -207,7 +209,9 @@ iCloud).
 The images belong to their photographers and agencies (see each caption's
 credit), and are licensed to Microsoft for Bing. This project only downloads
 them to your Mac for use as your wallpaper, as Bing's own wallpaper app does.
-Do not redistribute the images. This repository does not contain any.
+Do not redistribute the images. The only image in this repository is the
+sample at the top, a Webb image released under CC BY 4.0; reusing it requires
+its full credit line, shown with it.
 
 The image list comes from an undocumented Bing endpoint, which Microsoft may
 change at any time.
