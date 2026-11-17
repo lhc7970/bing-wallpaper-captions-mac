@@ -286,6 +286,11 @@ func jsonLine(_ value:Any) -> String {
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else { usage() }
 switch command {
+case "check-output":
+    guard args.count == 3 else { usage() }
+    let src = URL(fileURLWithPath:args[1]).resolvingSymlinksInPath().standardizedFileURL.path
+    let out = URL(fileURLWithPath:args[2]).resolvingSymlinksInPath().standardizedFileURL.path
+    guard out != src && !out.hasPrefix(src + "/") && !src.hasPrefix(out + "/") else { warn("rotation output must not overlap collection"); exit(1) }
 case "fields":
     guard args.count >= 2 else { usage() }
     for path in args.dropFirst() {

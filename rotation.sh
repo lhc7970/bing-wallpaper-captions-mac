@@ -39,6 +39,7 @@ if ! ls -A "$SRC_DIR" >/dev/null 2>&1; then
     echo "error: cannot read $SRC_DIR (macOS privacy protection? see README, Permission)" >&2
     exit 1
 fi
+swift "$BINGKIT" check-output "$SRC_DIR" "$OUT_DIR"
 collection_lock "$SRC_DIR"
 trap collection_unlock EXIT
 mkdir -p "$OUT_DIR"

@@ -84,4 +84,8 @@ class CollectionTests(unittest.TestCase):
   lock=self.root/'.bing-operation.lock';lock.mkdir();(lock/'pid').write_text('other')
   r=subprocess.run(['bash',str(ROOT/'bing.sh'),str(self.root)],env=self.env,capture_output=True,text=True)
   self.assertNotEqual(r.returncode,0);self.assertEqual((lock/'pid').read_text(),'other')
+ def test_rotation_output_cannot_overlap_collection(self):
+  for out in [self.root,self.archive,self.base]:
+   self.assertNotEqual(self.runkit('check-output',self.root,out,ok=False).returncode,0)
+  self.runkit('check-output',self.root,self.base/'rotation')
 if __name__=='__main__':unittest.main()
