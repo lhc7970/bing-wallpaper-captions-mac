@@ -22,6 +22,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=config.sh
 . "$HERE/config.sh"
 load_config
+filename_config
 SRC_DIR="$(collection_dir "${1:-}")" || exit 1
 OUT_DIR="${BING_ROTATION_DIR:-$HOME/Pictures/Bing_Wallpaper}"
 RECENT="${BING_ROTATION_RECENT:-8}"
@@ -38,19 +39,22 @@ if ! ls -A "$SRC_DIR" >/dev/null 2>&1; then
     echo "error: cannot read $SRC_DIR (macOS privacy protection? see README, Permission)" >&2
     exit 1
 fi
+collection_lock "$SRC_DIR"
+trap collection_unlock EXIT
 mkdir -p "$OUT_DIR"
 
 work_dir="$(mktemp -d)"
 # shellcheck disable=SC2329 # invoked via trap
-cleanup() { rm -rf "$work_dir"; }
+cleanup() { rm -rf "$work_dir"; collection_unlock; }
 trap cleanup EXIT
 
 # Images are named "YYYY-MM-DD …", so name order is date order. Conflict
 # copies ("… 2.jpg") and placeholders (".….icloud") are left out.
 all="$work_dir/all.txt"
 # shellcheck disable=SC2010 # names are matched by pattern, not parsed
-ls -1 "$SRC_DIR" | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} .*\.jpg$' \
-    | grep -Ev ' [0-9]+\.jpg$| \([0-9]+\)\.jpg$' | LC_ALL=C sort >"$all" || true
+swift "$BINGKIT" list "$SRC_DIR" >"$all.paths"
+# Retain paths relative to the collection so archives participate without moves.
+while IFS= read -r path; do printf '%s\n' "${path#"$SRC_DIR/"}"; done <"$all.paths" >"$all"
 total="$(wc -l <"$all" | tr -d ' ')"
 if [ "$total" -eq 0 ]; then
     echo "error: no images in $SRC_DIR" >&2
@@ -105,7 +109,7 @@ fi
 # example after XMP was added to it).
 missing=()
 while IFS= read -r name; do
-    if [ "$redraw_all" = 1 ] || [ ! -e "$OUT_DIR/$name" ] || [ "$SRC_DIR/$name" -nt "$OUT_DIR/$name" ]; then
+    if [ "$redraw_all" = 1 ] || [ ! -e "$OUT_DIR/${name##*/}" ] || [ "$SRC_DIR/$name" -nt "$OUT_DIR/${name##*/}" ]; then
         missing+=("$SRC_DIR/$name")
     fi
 done <"$want"
@@ -117,16 +121,20 @@ if [ "${#missing[@]}" -gt 0 ]; then
     # New copies first, then remove old ones, so the folder is never empty
     # while the desktop is using it.
     for f in "$work_dir/out"/*.jpg; do
-        [ -e "$f" ] && mv -f "$f" "$OUT_DIR/"
+        [ -e "$f" ] || continue
+        mv -f "$f" "$OUT_DIR/" || failed=1
     done
 fi
-if [ "$failed" = 0 ]; then
-    printf '%s\n' "$version" >"$version_file"
-fi
 
+[ "$failed" = 0 ] || exit 1
+while IFS= read -r name; do
+    [ -s "$OUT_DIR/${name##*/}" ] || exit 1
+done <"$want"
+printf '%s\n' "$version" >"$version_file"
+while IFS= read -r name; do printf '%s\n' "${name##*/}"; done <"$want" >"$work_dir/want-names.txt"
 for f in "$OUT_DIR"/*.jpg; do
     [ -e "$f" ] || continue
-    grep -Fxq -- "${f##*/}" "$want" || rm -f "$f"
+    grep -Fxq -- "${f##*/}" "$work_dir/want-names.txt" || rm -f "$f"
 done
 
 exit "$failed"

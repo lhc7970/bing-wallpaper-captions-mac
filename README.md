@@ -33,7 +33,7 @@ contains code only. See [Images and terms](#images-and-terms).
 - macOS with `bash`, `curl`, `sed` and `plutil` (all built in).
 - `swift`, for XMP and captions: Xcode Command Line Tools,
   `xcode-select --install`. Without it, `bing.sh` still downloads; it only
-  skips XMP.
+  is required; downloads fail safely if XMP cannot be written.
 - `bing.sh` also runs on Linux with `jq` (downloads only).
 
 ## Quick start
@@ -227,3 +227,61 @@ change at any time.
 ## License
 
 [MIT No Attribution](LICENSE).
+
+
+## Filename settings and archives
+
+`BING_FILENAME_LANGUAGE=en|zh` (default `en`) selects the **description** language;
+`BING_FILENAME_CREDIT=0|1` (default `0`) controls credit in the filename only.
+Set these in the existing config file or environment (environment wins). Empty or
+invalid values are errors. XMP and desktop credit text are independent of these
+switches. English descriptions fall back to Chinese, then image ID, with a notice;
+no translations are invented. Names retain `YYYY-MM-DD ` and `.jpg`; unsafe
+characters are removed and names are bounded in UTF-8 length. Naming does not
+rewrite XMP values. English backfill fills missing fields without overwriting
+existing titles or automatically renaming files.
+
+**Swift / Xcode Command Line Tools are now required for downloads.** A tag or
+readback failure leaves no final image and does not record success, so a later run
+can retry. The former download-without-XMP fallback (including Linux) is retired.
+
+The collection includes its immediate `archive` or `Archived` directory (also
+`Archive`/`archived`); other subdirectories are excluded. Archived photos participate
+in date deduplication and rotation without being moved to the root. Duplicate dates
+are reported and excluded from rotation/migration rather than guessed from numeric
+suffixes. Symlinks and known offline/iCloud placeholder images are skipped. This
+is not a recursive search through arbitrary folders.
+
+Preview existing names (no image writes):
+
+```sh
+./rename.sh /path/to/collection
+# Apply explicitly, retaining a NEW private JSONL recovery log outside the collection:
+./rename.sh /path/to/collection --apply /absolute/new-recovery.jsonl
+# Restore only files still matching the logged inode, size and modification time:
+./rename.sh /path/to/collection --restore /absolute/new-recovery.jsonl
+```
+
+Migration stays in each image's current directory and changes paths only. Images
+with incomplete XMP are left unchanged and reported. Destination conflicts are
+skipped; exclusive rename never overwrites a destination. The log is written and
+flushed before each rename, so interruption between rename and completion logging
+can still be recovered. Keep the log until satisfied; restoration skips changed
+or occupied paths and reports them. Exit 1 means at least one failure/skip requiring
+attention; exit 2 means invalid usage/configuration. Ordinary metadata fallback
+notices do not indicate a failed migration.
+
+Only run migration on one Mac at a time. Download, rotation and apply/restore share
+`.bing-operation.lock` in the collection. After a killed process, inspect the PID
+and confirm no operation remains before manually removing that lock. A local lock
+cannot fence another Mac's iCloud updates. A renamed library may change the day's
+random selection; rotation rebuilds only selected copies. Failed rendering/moves
+retain old copies and prevent cleanup. macOS may need to refresh the folder view.
+
+Validation (macOS, no third-party packages):
+
+```sh
+swiftc bingkit.swift -o /tmp/bingkit-test
+BINGKIT_TEST_BINARY=/tmp/bingkit-test python3 -m unittest discover -s tests -v
+bash -n bing.sh rotation.sh config.sh rename.sh
+```

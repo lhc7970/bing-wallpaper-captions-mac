@@ -28,6 +28,7 @@ import AppKit
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
+import Darwin
 
 // An identifier for this project's XMP fields; it does not need to resolve.
 let bingNamespace = "https://github.com/lhc7970/bing-wallpaper-captions-mac/xmp/1.0/" as CFString
@@ -76,6 +77,13 @@ func tag(_ input: String, _ output: String, _ pairs: [String]) -> Bool {
     guard CGImageDestinationCopyImageSource(destination, source, options, &error) else {
         warn("bingkit: cannot write \(output): \(String(describing: error?.takeRetainedValue()))")
         return false
+    }
+    guard let checkSource = imageSource(output), let check = CGImageSourceCopyMetadataAtIndex(checkSource,0,nil) else { return false }
+    for pair in pairs {
+        let scalars = pair.unicodeScalars
+        guard let eq = scalars.firstIndex(of:"=") else { return false }
+        let key = String(scalars[..<eq]), value = String(scalars[scalars.index(after:eq)...])
+        if !value.isEmpty && xmpString(check,key) != value { warn("XMP readback failed: \(key)"); return false }
     }
     return true
 }
@@ -201,11 +209,172 @@ func drawCaption(_ input: String, into directory: String) -> Bool {
     return true
 }
 
+// Collection paths are deliberately limited to the root and named archives.
+func collectionFiles(_ root: String) throws -> [String] {
+    let fm = FileManager.default
+    var dirs = [root]
+    for name in try fm.contentsOfDirectory(atPath: root) where ["archive", "archived"].contains(name.lowercased()) {
+        let path = (root as NSString).appendingPathComponent(name)
+        let a = try fm.attributesOfItem(atPath: path)
+        guard a[.type] as? FileAttributeType == .typeDirectory else { throw NSError(domain:"unsafe archive", code:1) }
+        dirs.append(path)
+    }
+    var files = [String]()
+    for dir in dirs {
+        for name in try fm.contentsOfDirectory(atPath: dir) {
+            if name.hasSuffix(".icloud") { warn("skip placeholder: \(name)"); continue }
+            guard name.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2} .*\.jpg$"#, options:.regularExpression) != nil else { continue }
+            guard !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { warn("skip control characters in path"); continue }
+            let path = (dir as NSString).appendingPathComponent(name)
+            let a = try fm.attributesOfItem(atPath:path)
+            guard a[.type] as? FileAttributeType == .typeRegular else { warn("skip nonregular: \(name)"); continue }
+            // Offline dataless files must not be materialized by an inventory.
+            var st = stat()
+            guard lstat(path, &st) == 0, st.st_flags & 0x40000000 == 0 else { warn("skip offline: \(name)"); continue }
+            files.append(path)
+        }
+    }
+    let groups = Dictionary(grouping:files) { String(($0 as NSString).lastPathComponent.prefix(10)) }
+    return groups.keys.sorted().flatMap { day -> [String] in
+        let group = groups[day]!
+        guard group.count == 1 else { warn("skip ambiguous date: \(day) (\(group.count) files)"); return [] }
+        return group
+    }
+}
+func filename(_ date:String, _ fields:[String:String]) throws -> String {
+    let lang = ProcessInfo.processInfo.environment["BING_FILENAME_LANGUAGE"] ?? "en"
+    let credit = ProcessInfo.processInfo.environment["BING_FILENAME_CREDIT"] ?? "0"
+    guard ["en","zh"].contains(lang), ["0","1"].contains(credit),
+          date.range(of:#"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"#,options:.regularExpression) != nil else { throw NSError(domain:"invalid filename settings/date",code:2) }
+    func clean(_ v:String) -> String {
+        let v = v.precomposedStringWithCanonicalMapping.replacingOccurrences(of:"/",with:", ").replacingOccurrences(of:":",with:" - ")
+        let scalars = v.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) && !"()\\*?\"<>|".unicodeScalars.contains($0) }
+        return String(String.UnicodeScalarView(scalars)).split(whereSeparator:{$0.isWhitespace}).joined(separator:" ").trimmingCharacters(in:CharacterSet(charactersIn:" ."))
+    }
+    let first = lang == "en" ? "bing:descriptionEn" : "dc:description"
+    let second = lang == "en" ? "dc:description" : "bing:descriptionEn"
+    var desc = ""
+    for key in [first,second,"bing:id"] {
+        let candidate = clean(fields[key] ?? "")
+        if !candidate.isEmpty { desc = candidate; if key != first { warn("note: \(date) filename falls back to \(key)") }; break }
+    }
+    guard !desc.isEmpty else { throw NSError(domain:"no reliable filename",code:1) }
+    let rights = clean(fields["dc:rights"] ?? "")
+    if credit == "1" && rights.isEmpty { warn("note: \(date) has no copyright record") }
+    let suffix = credit == "1" && !rights.isEmpty ? " " + rights : ""
+    let budget = 236 - suffix.utf8.count
+    guard budget > 0 else { throw NSError(domain:"copyright exceeds filename budget",code:1) }
+    var limited = ""
+    for c in desc { if (limited + String(c)).utf8.count > budget { break }; limited.append(c) }
+    guard !limited.isEmpty else { throw NSError(domain:"description exceeds filename budget",code:1) }
+    return date + " " + limited.trimmingCharacters(in:CharacterSet(charactersIn:" .")) + suffix + ".jpg"
+}
+let fieldKeys = ["dc:title","dc:description","dc:rights","photoshop:DateCreated","bing:id","bing:link","bing:titleEn","bing:descriptionEn"]
+func fields(_ path:String) throws -> [String:String] {
+    guard let source = imageSource(path), let m = CGImageSourceCopyMetadataAtIndex(source,0,nil) else { throw NSError(domain:"missing metadata",code:1) }
+    return Dictionary(uniqueKeysWithValues:fieldKeys.map { ($0,xmpString(m,$0)) })
+}
+func exclusiveMove(_ from:String,_ to:String) throws {
+    guard renamex_np(from,to,UInt32(RENAME_EXCL)) == 0 else { throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno)) }
+}
+func jsonLine(_ value:Any) -> String {
+    String(data:try! JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]),encoding:.utf8)!
+}
+
 // MARK: main
 
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else { usage() }
 switch command {
+case "fields":
+    guard args.count >= 2 else { usage() }
+    for path in args.dropFirst() {
+        do { print(jsonLine(["path":path,"fields":try fields(path)])) }
+        catch { warn("fields: \(path): \(error)"); exit(1) }
+    }
+case "restore":
+    guard args.count == 3 else { usage() }
+    do {
+        let root = URL(fileURLWithPath:args[1]).resolvingSymlinksInPath().path
+        let lines = try String(contentsOfFile:args[2],encoding:.utf8).split(separator:"\n")
+        var failed = false
+        for line in lines.reversed() {
+            guard let r = try JSONSerialization.jsonObject(with:Data(line.utf8)) as? [String:Any],
+                  let from = r["source"] as? String, let to = r["target"] as? String else { continue }
+            do {
+                let parent = URL(fileURLWithPath:from).deletingLastPathComponent().resolvingSymlinksInPath().path
+                let targetParent = URL(fileURLWithPath:to).deletingLastPathComponent().resolvingSymlinksInPath().path
+                guard parent == targetParent, parent == root || (URL(fileURLWithPath:parent).deletingLastPathComponent().path == root && ["archive","archived"].contains((parent as NSString).lastPathComponent.lowercased())) else { throw NSError(domain:"log outside collection",code:1) }
+                let a = try FileManager.default.attributesOfItem(atPath:to)
+                guard a[.type] as? FileAttributeType == .typeRegular,
+                      a[.systemFileNumber] as? NSNumber == r["inode"] as? NSNumber,
+                      a[.size] as? NSNumber == r["size"] as? NSNumber,
+                      (a[.modificationDate] as! Date).timeIntervalSince1970 == r["mtime"] as? Double else { throw NSError(domain:"target changed; do not restore",code:1) }
+                try exclusiveMove(to,from)
+                print(jsonLine(["restored":from]))
+            } catch { warn("restore skipped \(to): \(error)"); failed = true }
+        }
+        if failed { exit(1) }
+    } catch { warn("restore: \(error)"); exit(1) }
+case "list":
+    guard args.count == 2 else { usage() }
+    do { for path in try collectionFiles(args[1]) { print(path) } } catch { warn("inventory: \(error)"); exit(1) }
+case "name":
+    guard args.count == 3 else { usage() }
+    do { print(try filename(args[2], fields(args[1]))) } catch { warn("filename: \(error)"); exit(1) }
+case "move":
+    guard args.count == 3 else { usage() }
+    do { try exclusiveMove(args[1],args[2]) } catch { warn("move: \(error)"); exit(1) }
+case "rename":
+    guard args.count == 2 || args.count == 4 && args[2] == "--apply" else { usage() }
+    do {
+        let files = try collectionFiles(args[1])
+        let apply = args.count == 4
+        let log: FileHandle? = apply ? {
+            let fd = open(args[3], O_WRONLY | O_CREAT | O_EXCL, 0o600)
+            guard fd >= 0 else { warn("recovery log must be a new writable file"); exit(1) }
+            return FileHandle(fileDescriptor:fd,closeOnDealloc:true)
+        }() : nil
+        var failed = false
+        for path in files {
+            do {
+                let before = try FileManager.default.attributesOfItem(atPath:path)
+                let f = try fields(path)
+                guard !(f["dc:description"] ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+                      !(f["dc:rights"] ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+                      !(f["bing:id"] ?? "").isEmpty else { throw NSError(domain:"incomplete XMP: keep original name",code:1) }
+                let name = try filename(String((path as NSString).lastPathComponent.prefix(10)),f)
+                let to = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent(name)
+                if path == to { continue }
+                guard !FileManager.default.fileExists(atPath:to) else { throw NSError(domain:"target exists: keep original",code:1) }
+                let record: [String:Any] = ["source":path,"target":to,"size":before[.size]!,"inode":before[.systemFileNumber]!,"mtime":(before[.modificationDate] as! Date).timeIntervalSince1970]
+                if apply {
+                    log!.write((jsonLine(record)+"\n").data(using:.utf8)!); log!.synchronizeFile()
+                    let now = try FileManager.default.attributesOfItem(atPath:path)
+                    for k:FileAttributeKey in [.systemFileNumber,.size,.modificationDate] {
+                        guard String(describing:before[k]) == String(describing:now[k]) else { throw NSError(domain:"source changed",code:1) }
+                    }
+                    try exclusiveMove(path,to)
+                    log!.write((jsonLine(["completed":to])+"\n").data(using:.utf8)!);log!.synchronizeFile()
+                }
+                print(jsonLine(record))
+            } catch { warn("skip \(path): \(error)"); failed = true }
+        }
+        if failed { exit(1) }
+    } catch { warn("rename: \(error)"); exit(1) }
+
+case "fill":
+    guard args.count >= 3 else { usage() }
+    do {
+        let existing = try fields(args[1])
+        let pairs = args.dropFirst(3).filter { pair in
+            let scalars = pair.unicodeScalars
+        guard let eq = scalars.firstIndex(of:"=") else { return false }
+            let key = String(scalars[..<eq])
+            return ["bing:titleEn","bing:descriptionEn"].contains(key) && (existing[key] ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty
+        }
+        exit(tag(args[1],args[2],Array(pairs)) ? 0 : 1)
+    } catch { warn("fill: \(error)"); exit(1) }
 case "tag":
     guard args.count >= 3 else { usage() }
     exit(tag(args[1], args[2], Array(args.dropFirst(3))) ? 0 : 1)
@@ -217,7 +386,7 @@ case "info":
         var id = "", english = "0"
         if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) {
             id = xmpString(metadata, "bing:id")
-            english = xmpString(metadata, "bing:titleEn").isEmpty ? "0" : "1"
+            english = (!xmpString(metadata, "bing:titleEn").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && !xmpString(metadata, "bing:descriptionEn").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty) ? "1" : "0"
         }
         print("\(id)\t\(english)\t\(input)")
     }

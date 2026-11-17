@@ -21,6 +21,7 @@ BINGKIT="$HERE/bingkit.swift"
 # shellcheck source=config.sh
 . "$HERE/config.sh"
 load_config
+filename_config
 DEST_DIR="$(collection_dir "${1:-}")" || exit 1
 SEP=$'\037' # field separator for the English text table
 # English text appears about 15 hours after the Chinese text. A new image
@@ -40,8 +41,8 @@ fi
 if [ -f "$BINGKIT" ] && xcrun --find swift >/dev/null 2>&1; then
     XMP=1
 else
-    XMP=0
-    echo "note: swift not found, images are saved without XMP (see README)" >&2
+    echo "error: Swift is required to preserve XMP" >&2
+    exit 2
 fi
 
 # Print the string at a dotted key path (e.g. images.0.urlbase) from a JSON
@@ -84,7 +85,7 @@ image_id() {
 # files kept only in iCloud (".<name>.jpg.icloud", macOS 13 and earlier).
 have_date() {
     local f
-    for f in "$1/$2 "*.jpg "$1/.$2 "*.jpg.icloud; do
+    for f in "$1/$2 "*.jpg "$1/.$2 "*.jpg.icloud "$1"/{archive,Archive,archived,Archived}/"$2 "*.jpg "$1"/{archive,Archive,archived,Archived}/".$2 "*.jpg.icloud; do
         [ -e "$f" ] && return 0
     done
     return 1
@@ -109,10 +110,11 @@ record() { recorded "$1" || printf '%s\n' "$1" >>"$RECORD"; }
 # half-downloaded image. Same volume as $HOME on macOS, so mv is a rename.
 work_dir="$(mktemp -d)"
 # shellcheck disable=SC2329 # invoked via trap
-cleanup() { rm -rf "$work_dir"; }
+cleanup() { rm -rf "$work_dir"; collection_unlock; }
 trap cleanup EXIT
 
 mkdir -p "$DEST_DIR"
+collection_lock "$DEST_DIR"
 # Under launchd, macOS privacy protection can block listing ~/Documents.
 # Stop here instead of taking it for an empty folder and downloading again.
 if ! ls -A "$DEST_DIR" >/dev/null 2>&1; then
@@ -153,12 +155,13 @@ if [ "$XMP" = 1 ]; then
             title="$(json_get "$list" "images.$j.title" 2>/dev/null)" || title=""
             copyright="$(json_get "$list" "images.$j.copyright" 2>/dev/null)" || copyright=""
             split_copyright "$copyright"
-            printf '%s%s%s%s%s\n' "$(image_id "$url_base")" "$SEP" "$title" "$SEP" "$desc" >>"$en_text"
             j=$((j + 1))
+            case "$title$desc" in *$'\n'*|*"$SEP"*) echo "warning: unsafe English record skipped" >&2; continue ;; esac
+            printf '%s%s%s%s%s\n' "$(image_id "$url_base")" "$SEP" "$title" "$SEP" "$desc" >>"$en_text"
         done
     done
 fi
-has_english() { awk -F "$SEP" -v id="$1" '$1 == id { found = 1 } END { exit !found }' "$en_text"; }
+has_english() { awk -F "$SEP" -v id="$1" '$1 == id && $3 ~ /[^[:space:]]/ { found = 1 } END { exit !found }' "$en_text"; }
 now="$(date -u +%s)"
 
 images=0
@@ -196,7 +199,7 @@ for list in $lists; do
         fi
 
         url="$HOST${url_base}_UHD.jpg"
-        dest="$DEST_DIR/$date $(clean_name "$copyright").jpg"
+        dest="$DEST_DIR/$date (pending).jpg"
         part="$work_dir/download.jpg"
         echo "Downloading $url -> $dest"
         if ! curl -fsSL --retry 3 -o "$part" "$url"; then
@@ -216,10 +219,15 @@ for list in $lists; do
                 "bing:titleEn=$title_en" "bing:descriptionEn=$desc_en"; then
                 mv -f "$work_dir/tagged.jpg" "$part"
             else
-                echo "warning: saved without XMP: $dest" >&2
+                echo "error: XMP write failed; will retry: $date" >&2
+                failed=1
+                continue
             fi
         fi
-        mv -f "$part" "$dest"
+        if ! name="$(swift "$BINGKIT" name "$part" "$date")"; then failed=1; continue; fi
+        dest="$DEST_DIR/$name"
+        if have_date "$DEST_DIR" "$date"; then continue; fi
+        if ! swift "$BINGKIT" move "$part" "$dest"; then failed=1; continue; fi
         record "$date"
     done
 done
@@ -238,8 +246,11 @@ fi
 if [ "$XMP" = 1 ] && [ -s "$en_text" ] && [ -f "$work_dir/dates.txt" ]; then
     candidates=()
     while IFS= read -r date; do
-        for f in "$DEST_DIR/$date "*.jpg; do
-            [ -e "$f" ] && candidates+=("$f")
+        for f in "$DEST_DIR/$date "*.jpg "$DEST_DIR"/{archive,Archive,archived,Archived}/"$date "*.jpg; do
+            [ -f "$f" ] && [ ! -L "$f" ] || continue
+            case "$f" in *$'\n'*|*$'\t'*|*$'\r'*) echo "warning: unsafe path skipped" >&2; continue ;; esac
+            if [ "${#candidates[@]}" -gt 0 ] && printf '%s\n' "${candidates[@]}" | grep -Fxq -- "$f"; then continue; fi
+            candidates+=("$f")
         done
     done < <(LC_ALL=C sort -u "$work_dir/dates.txt")
     if [ "${#candidates[@]}" -gt 0 ]; then
@@ -255,7 +266,7 @@ if [ "$XMP" = 1 ] && [ -s "$en_text" ] && [ -f "$work_dir/dates.txt" ]; then
             IFS="$SEP" read -r _ title_en desc_en < <(awk -F "$SEP" -v id="$id" '$1 == id { print; exit }' "$en_text") || true
             [ -n "$title_en$desc_en" ] || continue
             echo "Adding English text -> $path"
-            if swift "$BINGKIT" tag "$path" "$work_dir/filled.jpg" \
+            if swift "$BINGKIT" fill "$path" "$work_dir/filled.jpg" \
                 "bing:titleEn=$title_en" "bing:descriptionEn=$desc_en"; then
                 mv -f "$work_dir/filled.jpg" "$path"
             else
