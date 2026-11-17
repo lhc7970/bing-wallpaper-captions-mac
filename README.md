@@ -31,10 +31,10 @@ contains code only. See [Images and terms](#images-and-terms).
 ## Requirements
 
 - macOS with `bash`, `curl`, `sed` and `plutil` (all built in).
-- `swift`, for XMP and captions: Xcode Command Line Tools,
-  `xcode-select --install`. Without it, `bing.sh` still downloads; it only
-  is required; downloads fail safely if XMP cannot be written.
-- `bing.sh` also runs on Linux with `jq` (downloads only).
+- `swift` (Xcode Command Line Tools), required for downloads, XMP and captions:
+  `xcode-select --install`. Downloads fail safely if XMP cannot be written.
+- Collection operations use macOS ImageIO and exclusive rename; Linux downloads
+  without XMP are no longer supported.
 
 ## Quick start
 
