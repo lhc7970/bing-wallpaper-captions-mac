@@ -201,3 +201,15 @@ conflict copies.
   turns out to reveal the image shown in shuffle mode.
 - **Other markets:** everything assumes `cn.bing.com` (Chinese text, with
   English through `ensearch=1`).
+
+
+## Filename policy update (Issue #5)
+
+The filename layer is now `YYYY-MM-DD <selected description>[ <credit>].jpg`,
+defaulting to English without credit. The XMP table and namespace above do not
+change. Read README's “Filename settings and archives” for the current failure,
+archive, lock and migration contracts; it supersedes the old filename/fallback
+examples above. Rotation inventories immediate named archive folders, rejects
+ambiguous dates and never prunes old copies after generation or installation
+failure. `info` retains its three-column contract, but hasEn now means both English
+fields are present. `fields` exports JSON; `fill` updates missing English only.

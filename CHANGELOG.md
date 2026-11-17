@@ -47,3 +47,12 @@ First public version.
   (`~/.config/bing-wallpaper-captions/config`), overridden by environment
   variables and the command argument. The default collection is
   *iCloud Drive* › `Bing_Wallpaper`.
+
+
+## Unreleased — filename options and archives
+
+- Default to English descriptions without filename credit; configurable language
+  and credit, with embedded XMP preserved.
+- Add preview/apply/restore migration and archive-aware rotation/date deduplication.
+- Preserve old rotation copies on rendering failure and fail downloads safely when
+  XMP cannot be written and read back. Swift is required for all downloads.
