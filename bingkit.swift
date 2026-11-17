@@ -210,7 +210,7 @@ func drawCaption(_ input: String, into directory: String) -> Bool {
 }
 
 // Collection paths are deliberately limited to the root and named archives.
-func collectionFiles(_ root: String) throws -> [String] {
+func collectionFiles(_ root: String, lineSafe: Bool = true) throws -> [String] {
     let fm = FileManager.default
     var dirs = [root]
     for name in try fm.contentsOfDirectory(atPath: root) where ["archive", "archived"].contains(name.lowercased()) {
@@ -223,8 +223,8 @@ func collectionFiles(_ root: String) throws -> [String] {
     for dir in dirs {
         for name in try fm.contentsOfDirectory(atPath: dir) {
             if name.hasSuffix(".icloud") { warn("skip placeholder: \(name)"); continue }
-            guard name.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2} .*\.jpg$"#, options:.regularExpression) != nil else { continue }
-            guard !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { warn("skip control characters in path"); continue }
+            guard name.hasSuffix(".jpg"), name.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2} "#, options:.regularExpression) != nil else { continue }
+            guard !lineSafe || !name.contains(where: { $0 == "\n" || $0 == "\r" || $0 == "\t" }) else { warn("skip control characters in path"); continue }
             let path = (dir as NSString).appendingPathComponent(name)
             let a = try fm.attributesOfItem(atPath:path)
             guard a[.type] as? FileAttributeType == .typeRegular else { warn("skip nonregular: \(name)"); continue }
@@ -333,7 +333,7 @@ case "move":
 case "rename":
     guard args.count == 2 || args.count == 4 && args[2] == "--apply" else { usage() }
     do {
-        let files = try collectionFiles(args[1])
+        let files = try collectionFiles(args[1], lineSafe:false)
         let apply = args.count == 4
         let log: FileHandle? = apply ? {
             let fd = open(args[3], O_WRONLY | O_CREAT | O_EXCL, 0o600)

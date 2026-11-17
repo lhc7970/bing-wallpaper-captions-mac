@@ -88,4 +88,9 @@ class CollectionTests(unittest.TestCase):
   for out in [self.root,self.archive,self.base]:
    self.assertNotEqual(self.runkit('check-output',self.root,out,ok=False).returncode,0)
   self.runkit('check-output',self.root,self.base/'rotation')
+ def test_control_character_source_can_migrate(self):
+  p=self.image(self.archive/'2020-01-01 \u200cOld\nName.jpg')
+  r=self.runkit('rename',self.root);self.assertEqual(json.loads(r.stdout)['source'],str(p))
+  log=self.base/'control-log';self.runkit('rename',self.root,'--apply',log);self.assertFalse(p.exists())
+  self.runkit('restore',self.root,log);self.assertTrue(p.exists())
 if __name__=='__main__':unittest.main()
