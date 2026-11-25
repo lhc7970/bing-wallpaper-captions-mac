@@ -198,13 +198,166 @@ that is usually on runs both. Every other Mac runs only `rotation.sh` on the
 same iCloud folder, 30 minutes later. Two downloaders would create iCloud
 conflict copies.
 
+## Floating captions over original wallpapers (issue #9)
+
+Could a Mac use the original JPEG as its wallpaper and display the same caption
+without generating a rotation folder? The first question is whether the Mac can
+identify the photo actually visible on each desktop. Test native shuffle first.
+If it exposes the original reliably, the user can keep the interval and random
+order in Wallpaper settings. An app that sets each photo itself can associate a
+caption with its own selection, at the cost of owning the rotation schedule.
+Neither route has been verified on the target Mac.
+
+| Question | Keep macOS folder shuffle | Let an app rotate originals |
+|---|---|---|
+| Which image is showing? | `NSWorkspace.desktopImageURL(for:)` accepts an `NSScreen` and can return nil. Its contract does not specify whether a shuffled folder yields the currently visible member. Compare each result with the visible photo. A folder, cache URL of unknown provenance, or stale path cannot identify an original. | Choose a readable original and call `setDesktopImageURL(_:for:options:)` for one screen. The caller knows the requested URL and gets success or an error. Check readback and visible pixels after success, including after another wallpaper choice in Settings. |
+| When does the caption change? | The SDK declares Space-change, wake and screen-configuration notifications. None promises a callback for each shuffle. Sample the getter periodically as well as on those events. Measure delay from visible change to correct URL. Hide the caption while the source is unknown. | Read the caption from the chosen URL, then publish it for that screen after a successful set and matching readback. Check transition lag. On failure, wake, restart or an external change, reconcile with the current desktop before displaying any saved caption. |
+| Multiple displays | Query every connected `NSScreen`. Verify two extended displays can report different originals simultaneously and refresh independently when one changes. | Make a separate set call per intended display. Test that changing one leaves the other correct, including when a display disconnects and reconnects. Re-enumerate screens after a layout change. |
+| Spaces | The getter takes a screen and has no Space argument. On an active-Space change, re-query each screen. Test by switching between desktops with different images on the same display. | The setter also takes no Space argument. Test which desktop changes and what the first desktop shows on return. A record of the last URL set for a display cannot establish the wallpaper of its other Spaces. |
+| Full-screen apps | The getter can be sampled on entry and exit. Check that the caption stays behind the app and resolves to the visible original on return, even if shuffle advanced. | A scheduled set can coincide with a full-screen Space. Test its effect on returning to the desktop before deciding whether to defer rotation there. Check the other display separately. |
+
+These API bounds come from the macOS 27.0 SDK, particularly the
+`NSDesktopImages` declarations in AppKit's `NSWorkspace.h`. A matching
+URL is evidence of identity only after comparison with the desktop. Pointing
+native shuffle at the collection also gives macOS control of folder membership.
+Check whether archived photos participate. Today [rotation.sh](../rotation.sh)
+includes eligible archived originals and selects eight recent and eight older
+images by default. An app-owned scheduler could reuse that selection before
+setting an original URL.
+
+### Displaying and reading the caption
+
+A resident AppKit helper could place one transparent, borderless window per
+display, aligned to its visible frame. Try a window level between the Core
+Graphics desktop and desktop-icon levels, with `ignoresMouseEvents` enabled
+and a window that cannot become key. AppKit's `canJoinAllSpaces` controls
+where a window may appear. It supplies no wallpaper identity. Test stacking,
+focus and Space transitions on the device. The proposed target is a caption
+visible on the desktop, behind ordinary windows and full-screen apps.
+
+A desktop WidgetKit widget suits a user-placed caption card. The host controls
+placement and timeline delivery. A helper can request `reloadTimelines(ofKind:)`,
+but that request carries neither a deadline nor a screen ID. A widget would
+still need a source for the image and a way to associate the card with that
+display. Use the window for the synchronized corner caption experiment. A
+widget is worth testing if a movable card with delayed updates is acceptable.
+
+Both routes can reuse `caption(for:_:)` and `xmpString(_:_:)` in
+[bingkit.swift](../bingkit.swift). They read the original with ImageIO, take the
+date from its filename, and extract Chinese title, description and credit plus
+the two English fields. When the description is missing, the reader falls back
+to the filename, splitting off a trailing credit when present. The drawing code
+already omits empty lines. Only the text reader and line formatting are needed
+by a window. For a device check, `swift bingkit.swift fields "/path/to/original.jpg"`
+prints raw XMP as JSON, including `bing:id`. It does not apply the display
+fallback. Always resolve the original before reading its caption.
+
+### Target Mac check
+
+1. In a test login, record `sw_vers`, display layout, “Displays have separate
+   Spaces”, and the starting Wallpaper settings for each desktop. Use two
+   extended displays if available and create a second desktop on the first.
+   Put copies of three visually distinct original JPEGs in a test folder. Label
+   them A, B and C in your notes and keep their dated filenames. From the repo
+   root, run `swift bingkit.swift caption "$refs" "$a" "$b" "$c"`, where the
+   lowercase variables are the three paths and `$refs` is an existing empty
+   directory outside the wallpaper folder. Read the expected caption from each
+   rendered copy and record it with the original filename and visible subject.
+   Include a JPEG with XMP but no `dc:description` and one without XMP in the
+   caption check. Verify the rendered lines against their filename fallback.
+   Run `fields` separately on each original and keep its raw JSON or error and
+   exit status alongside the reference.
+2. From Terminal in that login, save this probe as `probe.swift` in a scratch
+   directory and run `swiftc probe.swift -o probe` there. Running `./probe`
+   is read-only. The two-argument form sets the specified display's wallpaper.
+
+   ```swift
+   import AppKit
+
+   func fail(_ message: String, status: Int32) -> Never {
+       FileHandle.standardError.write(Data(("probe: " + message + "\n").utf8))
+       exit(status)
+   }
+
+   let args = Array(CommandLine.arguments.dropFirst())
+   guard args.isEmpty || args.count == 2 else {
+       fail("usage: ./probe [DISPLAY_ID IMAGE_PATH]", status: 2)
+   }
+   let workspace = NSWorkspace.shared
+   let displays = NSScreen.screens.compactMap { screen -> (id: String, screen: NSScreen)? in
+       let key = NSDeviceDescriptionKey("NSScreenNumber")
+       guard let id = screen.deviceDescription[key] as? NSNumber else { return nil }
+       return (id.stringValue, screen)
+   }
+   if args.count == 2 {
+       guard let target = displays.first(where: { $0.id == args[0] }) else {
+           fail("no connected display with ID \(args[0])", status: 2)
+       }
+       do {
+           let url = URL(fileURLWithPath: args[1])
+           try workspace.setDesktopImageURL(url, for: target.screen,
+               options: workspace.desktopImageOptions(for: target.screen) ?? [:])
+       } catch {
+           fail("setting \(args[1]) on display \(target.id): \(error.localizedDescription)", status: 1)
+       }
+   }
+   for (id, screen) in displays {
+       print(Date(), id, screen.localizedName,
+             workspace.desktopImageURL(for: screen)?.absoluteString ?? "nil")
+   }
+   ```
+
+3. **Native shuffle.** First select a single known JPEG and check the probe
+   against it. Then select the test folder, random order and the shortest
+   available interval. Choose the longest acceptable delay and a fixed
+   observation period (for example, five shuffle intervals). Run
+   `while true; do ./probe; sleep 1; done` in Terminal.
+   For every visible change during that period, record the time, display, desktop, subject and
+   time of the first matching URL. Mark a miss if no match arrives within the
+   accepted delay, even if a later sample matches. Keep nil, directory, cached,
+   stale and cross-display results verbatim. At the end of the period, allow
+   one delay window for pending matches, then stop with Control-C. Fewer than
+   three visible changes leaves coverage incomplete.
+4. **App-owned rotation.** Switch off shuffle for the test. From the same
+   directory run `./probe DISPLAY_ID "/absolute/path/to/A.jpg"`, replacing
+   the ID with one printed by the probe. Set B on the other display. With a
+   fresh `./probe`, verify both URLs and visible subjects are A/B before
+   proceeding. Set C on the first display only. Verify both again and require
+   C/B. Seeing C/C exposes a change to the untargeted display.
+
+   Run `./probe absent-id "$a"` and immediately check `echo $?` (expect 2
+   and a diagnostic naming the unknown ID). Repeat with a connected ID and
+   a nonexistent file. Record the setter's exit status (1 on API error), run
+   a separate read-only `./probe`, and record both visible subjects and URLs.
+   After a rejected set, expect C/B. Then change one image in Settings to test
+   drift.
+5. **Repeat for both routes.** Give the two desktops on one display different
+   known images or shuffle sources. Switch away and back, enter full screen
+   on one display for a rotation interval, then exit. For the setter route,
+   queue a change from Terminal before entering full screen, for example
+   `sleep 15 && ./probe DISPLAY_ID "/absolute/path/to/B.jpg"`.
+   Disconnect/reconnect the external screen and sleep/wake the Mac. Sample
+   each time and record which desktop actually changed. Mark unavailable
+   layouts or settings as untested.
+6. **Presentation needs a prototype.** Repeat those transitions with the
+   candidate window showing each source's caption. Verify the text against
+   the visible image, click and drag a Finder icon through the caption area,
+   cover it with a normal window, then enter and exit full screen. Record
+   stale text duration, focus changes and any caption drawn over an app. For
+   a widget trial, place a card on each display and record placement and actual
+   update time after a change. The URL probe alone cannot verify either UI.
+   Restore the starting wallpaper settings before removing the test files.
+
+Record the macOS build, route, display ID, active desktop, visible subject,
+returned URL, expected/observed text and delay together for each transition.
+Prefer native shuffle only if the visible original can be resolved on every
+tested desktop within the owner's acceptable delay. If that fails, the setter
+results and the owner's willingness to hand over rotation determine whether to
+pursue the helper. The rendered-copy workflow remains the available fallback.
+
 ## Ideas not implemented
 
 - **Favorites:** a Finder tag on an original adds it to every rotation.
-- **Caption floating over the wallpaper** instead of drawn into it. This needs
-  the current image: either the script rotates the wallpaper itself (for
-  example with `NSWorkspace`) and shows an overlay, or macOS's wallpaper state
-  turns out to reveal the image shown in shuffle mode.
 - **Other markets:** everything assumes `cn.bing.com` (Chinese text, with
   English through `ensearch=1`).
 
