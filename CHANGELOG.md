@@ -29,6 +29,8 @@ Notable changes. Format based on
 - Rotation accepts collection paths with trailing slashes and rejects output
   that overlaps the collection through an equivalent path, even before the
   output directory exists.
+- The LaunchAgent template runs rotation after a failed download and reports a
+  failure to launchd if either step fails.
 - `bingkit.swift tag` no longer rejects a field whose value starts with a
   joining character such as U+200C (zero-width non-joiner); such an image was
   saved without XMP.
