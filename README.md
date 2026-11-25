@@ -278,10 +278,18 @@ cannot fence another Mac's iCloud updates. A renamed library may change the day'
 random selection; rotation rebuilds only selected copies. Failed rendering/moves
 retain old copies and prevent cleanup. macOS may need to refresh the folder view.
 
-Validation (macOS, no third-party packages):
+## Validation
+
+Run from the repository root on macOS with the Xcode Command Line Tools and
+Python 3. The integration tests use temporary collections and mock Bing responses.
 
 ```sh
-swiftc bingkit.swift -o /tmp/bingkit-test
-BINGKIT_TEST_BINARY=/tmp/bingkit-test python3 -m unittest discover -s tests -v
-bash -n bing.sh rotation.sh config.sh rename.sh
+(
+  set -e
+  for script in ./*.sh; do bash -n "$script" || exit $?; done
+  build_dir=$(mktemp -d)
+  trap 'rm -rf "$build_dir"' EXIT
+  swiftc bingkit.swift -o "$build_dir/bingkit-test"
+  BINGKIT_TEST_BINARY="$build_dir/bingkit-test" python3 -m unittest discover -s tests -v
+)
 ```
