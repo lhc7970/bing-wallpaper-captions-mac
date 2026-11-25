@@ -23,7 +23,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/config.sh"
 load_config
 filename_config
-SRC_DIR="$(collection_dir "${1:-}")" || exit 1
+# A final slash protects trailing newlines from command substitution.
+collection="$(collection_dir "${1:-}" && printf /)" || exit 1
 OUT_DIR="${BING_ROTATION_DIR:-$HOME/Pictures/Bing_Wallpaper}"
 RECENT="${BING_ROTATION_RECENT:-8}"
 RANDOM_PICK="${BING_ROTATION_RANDOM:-8}"
@@ -35,11 +36,11 @@ if ! xcrun --find swift >/dev/null 2>&1; then
     echo "error: rotation needs swift: run xcode-select --install" >&2
     exit 2
 fi
-if ! ls -A "$SRC_DIR" >/dev/null 2>&1; then
-    echo "error: cannot read $SRC_DIR (macOS privacy protection? see README, Permission)" >&2
+if ! SRC_DIR="$(CDPATH= cd -P -- "$collection" && printf '%s/' "$PWD")" || ! ls -A "$SRC_DIR" >/dev/null 2>&1; then
+    echo "error: cannot read $collection (macOS privacy protection? see README, Permission)" >&2
     exit 1
 fi
-swift "$BINGKIT" check-output "$SRC_DIR" "$OUT_DIR"
+OUT_DIR="$(swift "$BINGKIT" check-output "$SRC_DIR" "$OUT_DIR")"
 collection_lock "$SRC_DIR"
 trap collection_unlock EXIT
 mkdir -p "$OUT_DIR"
@@ -52,10 +53,8 @@ trap cleanup EXIT
 # Images are named "YYYY-MM-DD …", so name order is date order. Conflict
 # copies ("… 2.jpg") and placeholders (".….icloud") are left out.
 all="$work_dir/all.txt"
-# shellcheck disable=SC2010 # names are matched by pattern, not parsed
-swift "$BINGKIT" list "$SRC_DIR" >"$all.paths"
-# Retain paths relative to the collection so archives participate without moves.
-while IFS= read -r path; do printf '%s\n' "${path#"$SRC_DIR/"}"; done <"$all.paths" >"$all"
+# Keep the collection path (which may contain newlines) out of line-based inventory.
+(cd -P -- "$SRC_DIR" && swift "$BINGKIT" list .) | sed 's|^\./||' >"$all"
 total="$(wc -l <"$all" | tr -d ' ')"
 if [ "$total" -eq 0 ]; then
     echo "error: no images in $SRC_DIR" >&2
@@ -110,8 +109,8 @@ fi
 # example after XMP was added to it).
 missing=()
 while IFS= read -r name; do
-    if [ "$redraw_all" = 1 ] || [ ! -e "$OUT_DIR/${name##*/}" ] || [ "$SRC_DIR/$name" -nt "$OUT_DIR/${name##*/}" ]; then
-        missing+=("$SRC_DIR/$name")
+    if [ "$redraw_all" = 1 ] || [ ! -e "$OUT_DIR/${name##*/}" ] || [ "$SRC_DIR$name" -nt "$OUT_DIR/${name##*/}" ]; then
+        missing+=("$SRC_DIR$name")
     fi
 done <"$want"
 

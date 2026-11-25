@@ -277,6 +277,54 @@ func fields(_ path:String) throws -> [String:String] {
 func exclusiveMove(_ from:String,_ to:String) throws {
     guard renamex_np(from,to,UInt32(RENAME_EXCL)) == 0 else { throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno)) }
 }
+
+func physicalDirectory(_ path: String) throws -> URL {
+    guard let resolved = realpath(path + "/.", nil) else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+    defer { free(resolved) }
+    return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
+}
+
+// Return the existing directory and any components mkdir still needs to create.
+// Resolve links before "..", including when a missing component is backed out.
+func directoryPrefix(_ path: String) throws -> (existing: URL, missing: [String]) {
+    let scalars = path.unicodeScalars
+    var dir = URL(fileURLWithPath: scalars.first == "/" ? "/" : FileManager.default.currentDirectoryPath,
+                  isDirectory: true)
+    var missing = [String]()
+    for component in scalars.split(separator: "/").map(String.init) {
+        if component == "." { continue }
+        if component == ".." {
+            if !missing.isEmpty { missing.removeLast() }
+            else if dir.path != "/" { dir.deleteLastPathComponent() }
+            continue
+        }
+        if missing.isEmpty {
+            let next = dir.appendingPathComponent(component, isDirectory: true)
+            var entry = stat()
+            if lstat(next.path, &entry) == 0 {
+                dir = try physicalDirectory(next.path)
+                continue
+            }
+            guard errno == ENOENT else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        }
+        missing.append(component)
+    }
+    return (dir, missing)
+}
+
+func isAncestorOrSame(_ ancestor: URL, of directory: URL) throws -> Bool {
+    var target = stat()
+    guard stat(ancestor.path, &target) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+    var dir = directory
+    while true {
+        var entry = stat()
+        guard stat(dir.path, &entry) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        if entry.st_dev == target.st_dev && entry.st_ino == target.st_ino { return true }
+        if dir.path == "/" { return false }
+        dir.deleteLastPathComponent()
+    }
+}
+
 func jsonLine(_ value:Any) -> String {
     String(data:try! JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]),encoding:.utf8)!
 }
@@ -288,9 +336,17 @@ guard let command = args.first else { usage() }
 switch command {
 case "check-output":
     guard args.count == 3 else { usage() }
-    let src = URL(fileURLWithPath:args[1]).resolvingSymlinksInPath().standardizedFileURL.path
-    let out = URL(fileURLWithPath:args[2]).resolvingSymlinksInPath().standardizedFileURL.path
-    guard out != src && !out.hasPrefix(src + "/") && !src.hasPrefix(out + "/") else { warn("rotation output must not overlap collection"); exit(1) }
+    do {
+        let src = try physicalDirectory(args[1])
+        let (parent, missing) = try directoryPrefix(args[2])
+        if try isAncestorOrSame(src, of: parent) || (missing.isEmpty && isAncestorOrSame(parent, of: src)) {
+            warn("rotation output must not overlap collection")
+            exit(1)
+        }
+        let output = missing.reduce(parent) { $0.appendingPathComponent($1, isDirectory: true) }
+        // A final slash preserves any trailing newline in the name through shell command substitution.
+        print(output.path + "/")
+    } catch { warn("check-output: \(error)"); exit(1) }
 case "fields":
     guard args.count >= 2 else { usage() }
     for path in args.dropFirst() {

@@ -106,11 +106,17 @@ RECORD="$DEST_DIR/.bing-downloaded"
 recorded() { grep -qx -- "$1" "$RECORD" 2>/dev/null; }
 record() { recorded "$1" || printf '%s\n' "$1" >>"$RECORD"; }
 
-# Work files live outside the download folder so iCloud never syncs a
-# half-downloaded image. Same volume as $HOME on macOS, so mv is a rename.
+# Fetch lists and raw images in the system temporary directory.
 work_dir="$(mktemp -d)"
+stage_dir=""
+fill_dir=""
 # shellcheck disable=SC2329 # invoked via trap
-cleanup() { rm -rf "$work_dir"; collection_unlock; }
+cleanup() {
+    rm -rf "$work_dir"
+    if [ -n "$stage_dir" ]; then rm -rf "$stage_dir"; fi
+    if [ -n "$fill_dir" ]; then rm -rf "$fill_dir"; fi
+    collection_unlock
+}
 trap cleanup EXIT
 
 mkdir -p "$DEST_DIR"
@@ -121,13 +127,15 @@ if ! ls -A "$DEST_DIR" >/dev/null 2>&1; then
     echo "error: cannot read $DEST_DIR (macOS privacy protection? see README, Permission)" >&2
     exit 1
 fi
+# Stage the tagged image beside its destination so exclusive rename is atomic.
+stage_dir="$(mktemp -d "$DEST_DIR/.bing-stage.XXXXXXXX")"
 
 failed=0
-lists=""
+lists=()
 for page in $PAGES; do
     list="$work_dir/zh-$page.json"
     if fetch "$list" "$HOST/HPImageArchive.aspx?format=js&idx=$page&n=$MAX_ITEMS"; then
-        lists="$lists $list"
+        lists+=("$list")
     elif [ "$page" = 0 ]; then
         echo "error: failed to fetch image list" >&2
         exit 1
@@ -165,7 +173,7 @@ has_english() { awk -F "$SEP" -v id="$1" '$1 == id && $3 ~ /[^[:space:]]/ { foun
 now="$(date -u +%s)"
 
 images=0
-for list in $lists; do
+for list in "${lists[@]}"; do
     i=0
     while [ "$i" -lt "$MAX_ITEMS" ]; do
         start_date="$(json_get "$list" "images.$i.startdate" 2>/dev/null)" || break
@@ -213,21 +221,19 @@ for list in $lists; do
             title_en="" desc_en=""
             IFS="$SEP" read -r _ title_en desc_en < <(awk -F "$SEP" -v id="$id" '$1 == id { print; exit }' "$en_text") || true
             split_copyright "$copyright"
-            if swift "$BINGKIT" tag "$part" "$work_dir/tagged.jpg" \
+            if ! swift "$BINGKIT" tag "$part" "$stage_dir/tagged.jpg" \
                 "dc:title=$title" "dc:description=$desc" "dc:rights=$credit" \
                 "photoshop:DateCreated=$date" "bing:id=$id" "bing:link=$link" \
                 "bing:titleEn=$title_en" "bing:descriptionEn=$desc_en"; then
-                mv -f "$work_dir/tagged.jpg" "$part"
-            else
                 echo "error: XMP write failed; will retry: $date" >&2
                 failed=1
                 continue
             fi
         fi
-        if ! name="$(swift "$BINGKIT" name "$part" "$date")"; then failed=1; continue; fi
+        if ! name="$(swift "$BINGKIT" name "$stage_dir/tagged.jpg" "$date")"; then failed=1; continue; fi
         dest="$DEST_DIR/$name"
         if have_date "$DEST_DIR" "$date"; then continue; fi
-        if ! swift "$BINGKIT" move "$part" "$dest"; then failed=1; continue; fi
+        if ! swift "$BINGKIT" move "$stage_dir/tagged.jpg" "$dest"; then failed=1; continue; fi
         record "$date"
     done
 done
@@ -235,8 +241,8 @@ done
 # Keep only dates Bing can still return (16 days, one spare for time zones).
 if [ -f "$RECORD" ]; then
     cutoff="$(date -v-16d +%Y-%m-%d 2>/dev/null || date -d '16 days ago' +%Y-%m-%d)"
-    awk -v cutoff="$cutoff" '$0 >= cutoff' "$RECORD" | LC_ALL=C sort -u >"$work_dir/record"
-    mv -f "$work_dir/record" "$RECORD"
+    awk -v cutoff="$cutoff" '$0 >= cutoff' "$RECORD" | LC_ALL=C sort -u >"$stage_dir/record"
+    mv -f "$stage_dir/record" "$RECORD"
 fi
 
 # Fill in English text that was not out yet when an image was saved (for
@@ -266,13 +272,16 @@ if [ "$XMP" = 1 ] && [ -s "$en_text" ] && [ -f "$work_dir/dates.txt" ]; then
             IFS="$SEP" read -r _ title_en desc_en < <(awk -F "$SEP" -v id="$id" '$1 == id { print; exit }' "$en_text") || true
             [ -n "$title_en$desc_en" ] || continue
             echo "Adding English text -> $path"
-            if swift "$BINGKIT" fill "$path" "$work_dir/filled.jpg" \
+            # The archive itself may be a mount point. Rename on the original's filesystem.
+            fill_dir="$(mktemp -d "${path%/*}/.bing-fill.XXXXXXXX")"
+            if swift "$BINGKIT" fill "$path" "$fill_dir/filled.jpg" \
                 "bing:titleEn=$title_en" "bing:descriptionEn=$desc_en"; then
-                mv -f "$work_dir/filled.jpg" "$path"
+                mv -f "$fill_dir/filled.jpg" "$path"
             else
                 echo "warning: could not add English text to $path" >&2
-                rm -f "$work_dir/filled.jpg"
             fi
+            rm -rf "$fill_dir"
+            fill_dir=""
         done <"$work_dir/info.txt"
     fi
 fi
