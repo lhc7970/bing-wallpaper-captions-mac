@@ -45,7 +45,9 @@ for every image Bing still lists. `bingkit.swift info` reads each candidate's
 `bing:id` and whether it has English; the English text is taken by that ID
 only, so a date mix-up or a market showing a different picture cannot pair
 the wrong texts. Images without XMP are skipped. `tag` merges into the
-existing XMP.
+existing XMP. Backfill creates the replacement in a private staging directory
+under the original's parent, so installation is a single rename even when
+the archive and the system temporary directory are on different volumes.
 
 ## Identity: one image per date
 
@@ -116,6 +118,10 @@ declares.
 - **Safe update:** new copies are drawn first and moved in. Then copies that
   are no longer wanted are removed. The folder is never emptied, because the
   wallpaper is using it.
+- Rotation uses the physical collection root for both inventory and rendering.
+  Before creating the output, it compares directory device and inode numbers
+  along the existing paths. A new child of a case or symlink alias of the
+  collection would otherwise put generated copies among the originals.
 - **Redraw:** when an original is newer than its copy (for example, XMP was
   added), when the caption look changes (`CAPTION_VERSION`), or when a
   narrower screen is seen.

@@ -84,6 +84,9 @@ EOF
   leading `~/` work, and unknown keys are reported. The file is read, not run
   as a script.
 - **Location:** `BING_CONFIG` points to another config file.
+- The collection can live on another volume, including one with spaces in its
+  name, for example `./bing.sh "/Volumes/Wallpaper SSD/Bing"`. Rotation also
+  accepts a trailing slash on the collection path.
 - **No iCloud Drive** (for example on Linux): set `BING_WALLPAPER_DIR`, or the
   scripts stop with a hint.
 
@@ -105,14 +108,21 @@ EOF
   days), a later run adds English text that was not out when the image was
   saved. The match is by the image's own ID in its XMP (`bing:id`), never by
   date, so Chinese and English always describe the same picture. Pixels do not
-  change. Images without XMP are left alone.
-- **Downloads are atomic.** Images go to a temporary folder first, so iCloud
-  never syncs a half-written file. Failed downloads leave nothing behind and
-  are retried on the next run.
+  change. Backfill stages the updated JPEG beside its original, including in
+  archives, then atomically replaces the original after XMP verification.
+  Images without XMP are left alone.
+- **Downloads are atomic.** Raw images download to the system temporary folder.
+  The downloader writes and verifies XMP in a private staging directory inside
+  the collection, then renames the complete JPEG into place without overwriting
+  an existing file. It records the date only after publication succeeds or it
+  finds an existing image for that date.
 - **The rotation folder is generated.** Copies that are still wanted are kept,
   and are redrawn only when their original, the caption style or the screen
   changes. The random older images are picked once per day: every run on the
-  same day keeps the same ones. Do not keep your own files in that folder.
+  same day keeps the same ones. Choose a folder outside the collection that
+  also does not contain the collection. Rotation checks existing directories
+  for overlap before creating the output, including paths reached through a
+  symlink or alternate capitalization. Do not keep your own files in that folder.
 - **System Settings may show missing thumbnails** for copies that were
   replaced while its Wallpaper pane stayed open; it appears to keep the list it
   read earlier. Quitting and reopening System Settings is the first thing to
@@ -307,3 +317,9 @@ Python 3. The integration tests use temporary collections and mock Bing response
   BINGKIT_TEST_BINARY="$build_dir/bingkit-test" python3 -m unittest discover -s tests -v
 )
 ```
+
+To exercise cross-volume publication and archived English backfill, set
+`BING_TEST_VOLUME` to a writable
+directory on a different filesystem from `TMPDIR` when running the test suite.
+The test creates and cleans up a temporary collection there and uses fixture
+images. Without this setting the suite skips that case.

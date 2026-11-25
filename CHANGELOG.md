@@ -22,6 +22,13 @@ Notable changes. Format based on
   text.
 
 ### Fixed
+- Downloads now publish atomically when the collection and temporary directory
+  are on different volumes, and accept temporary paths containing spaces.
+- English backfill atomically replaces originals in their own directory,
+  including archived JPEGs on a separate volume.
+- Rotation accepts collection paths with trailing slashes and rejects output
+  that overlaps the collection through an equivalent path, even before the
+  output directory exists.
 - The LaunchAgent template runs rotation after a failed download and reports a
   failure to launchd if either step fails.
 - `bingkit.swift tag` no longer rejects a field whose value starts with a
