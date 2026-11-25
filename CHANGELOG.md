@@ -22,6 +22,8 @@ Notable changes. Format based on
   text.
 
 ### Fixed
+- The LaunchAgent template runs rotation after a failed download and reports a
+  failure to launchd if either step fails.
 - `bingkit.swift tag` no longer rejects a field whose value starts with a
   joining character such as U+200C (zero-width non-joiner); such an image was
   saved without XMP.

@@ -144,7 +144,10 @@ paths:
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>/Users/YOU/bing-wallpaper-captions-mac/bing.sh; /Users/YOU/bing-wallpaper-captions-mac/rotation.sh</string>
+        <string>status=0; "$1" || status=$?; "$2" || status=$?; exit "$status"</string>
+        <string>local.bing-wallpapers</string>
+        <string>/Users/YOU/bing-wallpaper-captions-mac/bing.sh</string>
+        <string>/Users/YOU/bing-wallpaper-captions-mac/rotation.sh</string>
     </array>
     <key>StartCalendarInterval</key>
     <array>
@@ -158,7 +161,18 @@ paths:
 </plist>
 ```
 
-The job reads the same config file, so settings need no change to the plist.
+The job runs the downloader and then rotates the available images, even if the
+download fails. Its exit status is zero when both steps succeed. Otherwise it
+returns the exit code of the last step that failed. Both scripts read the same
+config file as when run by hand.
+
+For an already loaded job, replace its `ProgramArguments` with the array above,
+keeping your local script paths. Check the edited plist with
+`plutil -lint ~/Library/LaunchAgents/local.bing-wallpapers.plist`, then run
+the `bootout` command below followed by `bootstrap`. With `RunAtLoad` enabled,
+the updated job runs immediately. Use
+`launchctl print gui/$(id -u)/local.bing-wallpapers` to check the loaded
+arguments and, after the run finishes, its last exit code.
 
 ```sh
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.bing-wallpapers.plist   # enable
@@ -177,7 +191,7 @@ when the Mac wakes. It does not run while nobody is logged in.
 
 ### One Mac downloads, every Mac shows
 
-Run `bing.sh; rotation.sh` on **one** Mac that is usually on. On every other
+Use the two-step job above on **one** Mac that is usually on. On every other
 Mac that uses the same iCloud collection, run only `rotation.sh`, a bit later
 (for example at 16:30 and 22:30), so iCloud has synced the new image first. Two Macs
 downloading at once would create iCloud conflict copies.
