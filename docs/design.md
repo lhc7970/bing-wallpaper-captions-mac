@@ -109,11 +109,12 @@ declares.
   its caption drawn on it. On a normal day 7 of the newest stay as they are,
   one new image is drawn, and the 8 older ones are picked again.
 - **One random pick per day:** the job runs more than once a day (16:00,
-  22:00, at login). Each older image is ranked by a hash of the date and its
-  name, so every run on the same day picks the same 8 and rewrites nothing.
-  It also stays stable when the collection gains an image during the day, and
-  every Mac picks the same ones. Changing the folder on every run left System
-  Settings, open for a day, showing many missing thumbnails; it appears to
+  22:00, at login). Each older image is ranked by a hash of the local date and
+  its path in the collection. Macs with the same date, candidate paths and
+  counts pick the same images. A new arrival can push a formerly recent image
+  into the older pool, where its rank can displace an earlier pick.
+  Changing the folder on every run left System Settings, open for a day,
+  showing many missing thumbnails; it appears to
   keep an older list of the folder.
 - **Safe update:** new copies are drawn first and moved in. Then copies that
   are no longer wanted are removed. The folder is never emptied, because the
@@ -123,7 +124,7 @@ declares.
   along the existing paths. A new child of a case or symlink alias of the
   collection would otherwise put generated copies among the originals.
 - **Redraw:** when an original is newer than its copy (for example, XMP was
-  added), when the caption look changes (`CAPTION_VERSION`), or when a
+  added), when the caption look or its configured side changes, or when a
   narrower screen is seen.
 - **Location:** local, not synced by iCloud. It is easy to pick in Settings,
   and it can be deleted and rebuilt at any time.
