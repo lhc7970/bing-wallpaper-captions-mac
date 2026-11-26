@@ -23,8 +23,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/config.sh"
 load_config
 filename_config
-# A final slash protects trailing newlines from command substitution.
-collection="$(collection_dir "${1:-}" && printf /)" || exit 1
+collection="$(collection_dir "${1:-}")" || exit 1
 OUT_DIR="${BING_ROTATION_DIR:-$HOME/Pictures/Bing_Wallpaper}"
 RECENT="${BING_ROTATION_RECENT:-8}"
 RANDOM_PICK="${BING_ROTATION_RANDOM:-8}"
@@ -71,9 +70,8 @@ if [ "$RECENT" -gt 0 ]; then
 fi
 if [ "$older" -gt 0 ] && [ "$RANDOM_PICK" -gt 0 ]; then
     # The older images change once a day, not on every run: each one is ranked
-    # by a hash of today's date and its name. Every run on the same day, and
-    # every Mac, picks the same ones, even if the collection gains an image in
-    # between. (C locale: the hash works on bytes, whatever the caller's locale.)
+    # by a hash of today's date and its name. An unchanged older pool gives
+    # the same pick for that date. The C locale hashes the same bytes on every Mac.
     head -n "$older" "$all" | LC_ALL=C awk -v seed="$(date +%Y-%m-%d)" '
         BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
         {
@@ -99,7 +97,9 @@ export BING_SCREEN_ASPECT="$aspect"
 
 # A new caption look or a narrower screen means every copy is drawn again.
 version_file="$OUT_DIR/.caption-version"
-version="$CAPTION_VERSION $aspect"
+position=bottom-left
+if [ "${BING_CAPTION_POSITION:-}" = bottom-right ]; then position=bottom-right; fi
+version="$CAPTION_VERSION $aspect $position"
 redraw_all=0
 if [ "$(cat "$version_file" 2>/dev/null || true)" != "$version" ]; then
     redraw_all=1
@@ -117,7 +117,8 @@ done <"$want"
 failed=0
 if [ "${#missing[@]}" -gt 0 ]; then
     mkdir "$work_dir/out"
-    swift "$BINGKIT" caption "$work_dir/out" "${missing[@]}" || failed=1
+    # On failure the staging directory may contain an unfinished JPEG.
+    swift "$BINGKIT" caption "$work_dir/out" "${missing[@]}" || exit 1
     # New copies first, then remove old ones, so the folder is never empty
     # while the desktop is using it.
     for f in "$work_dir/out"/*.jpg; do

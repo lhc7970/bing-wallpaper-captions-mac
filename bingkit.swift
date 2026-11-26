@@ -357,10 +357,18 @@ case "restore":
     guard args.count == 3 else { usage() }
     do {
         let root = URL(fileURLWithPath:args[1]).resolvingSymlinksInPath().path
-        let lines = try String(contentsOfFile:args[2],encoding:.utf8).split(separator:"\n")
+        let data = try Data(contentsOf: URL(fileURLWithPath: args[2]))
         var failed = false
-        for line in lines.reversed() {
-            guard let r = try JSONSerialization.jsonObject(with:Data(line.utf8)) as? [String:Any],
+        for line in data.split(separator: 0x0A).reversed() {
+            let record: Any
+            do {
+                record = try JSONSerialization.jsonObject(with: line)
+            } catch where line.endIndex == data.endIndex {
+                warn("restore: skipped incomplete trailing recovery record")
+                failed = true
+                continue
+            }
+            guard let r = record as? [String:Any],
                   let from = r["source"] as? String, let to = r["target"] as? String else { continue }
             do {
                 let parent = URL(fileURLWithPath:from).deletingLastPathComponent().resolvingSymlinksInPath().path
@@ -389,13 +397,24 @@ case "move":
 case "rename":
     guard args.count == 2 || args.count == 4 && args[2] == "--apply" else { usage() }
     do {
-        let files = try collectionFiles(args[1], lineSafe:false)
         let apply = args.count == 4
-        let log: FileHandle? = apply ? {
-            let fd = open(args[3], O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        let root = try physicalDirectory(args[1])
+        let files = try collectionFiles(apply ? root.path : args[1], lineSafe:false)
+        var log: FileHandle?
+        if apply {
+            let logPath = args[3] as NSString
+            let parent = logPath.deletingLastPathComponent
+            let logDir = try physicalDirectory(parent.isEmpty ? "." : parent)
+            guard try !isAncestorOrSame(root, of: logDir) else {
+                warn("recovery log must be outside the collection")
+                exit(1)
+            }
+            guard logPath.length > 0, !logPath.hasSuffix("/") else { usage() }
+            let newLog = logDir.appendingPathComponent(logPath.lastPathComponent)
+            let fd = open(newLog.path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
             guard fd >= 0 else { warn("recovery log must be a new writable file"); exit(1) }
-            return FileHandle(fileDescriptor:fd,closeOnDealloc:true)
-        }() : nil
+            log = FileHandle(fileDescriptor:fd,closeOnDealloc:true)
+        }
         var failed = false
         for path in files {
             do {
@@ -443,7 +462,9 @@ case "info":
     guard args.count >= 2 else { usage() }
     var ok = true
     for input in args.dropFirst() {
-        guard let source = imageSource(input) else { warn("bingkit: cannot read \(input)"); ok = false; continue }
+        guard let source = imageSource(input), CGImageSourceGetCount(source) > 0 else {
+            warn("bingkit: cannot read \(input)"); ok = false; continue
+        }
         var id = "", english = "0"
         if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) {
             id = xmpString(metadata, "bing:id")

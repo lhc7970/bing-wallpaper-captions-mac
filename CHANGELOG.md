@@ -10,9 +10,8 @@ Notable changes. Format based on
   Creation (CC BY 4.0, credited below it), in place of the plain-text caption.
 
 ### Changed
-- The random older images in the rotation folder are picked once per day (a
-  hash of the date and the file name), not on every run, so the extra daily
-  runs no longer replace them each time.
+- With an unchanged pool of older images, the daily hash of the date and
+  relative image paths keeps the same picks across extra runs that day.
 - A new image waits (up to 24 hours) until its English text is published,
   about 15 hours after the Chinese text, so it is not saved without English.
   The suggested daily times are now 16:00 and 22:00 China time.
@@ -22,6 +21,13 @@ Notable changes. Format based on
   text.
 
 ### Fixed
+- Downloads and migration preserve collection names ending in a newline.
+- Dated directories and symlinks no longer enter the download ledger.
+- English backfill reports image read and write failures in the downloader's exit status.
+- Rotation retains usable copies after a failed render and redraws them when
+  the caption side changes.
+- Migration requires a recovery log outside the collection and records
+  absolute paths. Restore recovers verified entries before a torn final record.
 - Downloads now publish atomically when the collection and temporary directory
   are on different volumes, and accept temporary paths containing spaces.
 - English backfill atomically replaces originals in their own directory,

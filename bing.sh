@@ -23,6 +23,7 @@ BINGKIT="$HERE/bingkit.swift"
 load_config
 filename_config
 DEST_DIR="$(collection_dir "${1:-}")" || exit 1
+DEST_DIR="${DEST_DIR%/}"
 SEP=$'\037' # field separator for the English text table
 # English text appears about 15 hours after the Chinese text. A new image
 # waits for it this long at most; after that it is saved without English.
@@ -86,7 +87,7 @@ image_id() {
 have_date() {
     local f
     for f in "$1/$2 "*.jpg "$1/.$2 "*.jpg.icloud "$1"/{archive,Archive,archived,Archived}/"$2 "*.jpg "$1"/{archive,Archive,archived,Archived}/".$2 "*.jpg.icloud; do
-        [ -e "$f" ] && return 0
+        [ -f "$f" ] && [ ! -L "$f" ] && return 0
     done
     return 1
 }
@@ -254,19 +255,21 @@ if [ "$XMP" = 1 ] && [ -s "$en_text" ] && [ -f "$work_dir/dates.txt" ]; then
     while IFS= read -r date; do
         for f in "$DEST_DIR/$date "*.jpg "$DEST_DIR"/{archive,Archive,archived,Archived}/"$date "*.jpg; do
             [ -f "$f" ] && [ ! -L "$f" ] || continue
-            case "$f" in *$'\n'*|*$'\t'*|*$'\r'*) echo "warning: unsafe path skipped" >&2; continue ;; esac
-            if [ "${#candidates[@]}" -gt 0 ] && printf '%s\n' "${candidates[@]}" | grep -Fxq -- "$f"; then continue; fi
-            candidates+=("$f")
+            # Keep the collection path out of info's line-based output.
+            relative="${f#"$DEST_DIR/"}"
+            case "$relative" in *$'\n'*|*$'\t'*|*$'\r'*) echo "warning: unsafe path skipped" >&2; continue ;; esac
+            if [ "${#candidates[@]}" -gt 0 ] && printf '%s\n' "${candidates[@]}" | grep -Fxq -- "$relative"; then continue; fi
+            candidates+=("$relative")
         done
     done < <(LC_ALL=C sort -u "$work_dir/dates.txt")
     if [ "${#candidates[@]}" -gt 0 ]; then
-        swift "$BINGKIT" info "${candidates[@]}" >"$work_dir/info.txt" 2>/dev/null || true
+        (CDPATH= cd -P -- "$DEST_DIR" && swift "$BINGKIT" info "${candidates[@]}") >"$work_dir/info.txt" || failed=1
         tab=$'\t'
         while IFS= read -r line; do
             id="${line%%"$tab"*}"
             rest="${line#*"$tab"}"
             has_en="${rest%%"$tab"*}"
-            path="${rest#*"$tab"}"
+            path="$DEST_DIR/${rest#*"$tab"}"
             [ -n "$id" ] && [ "$has_en" = 0 ] || continue
             title_en="" desc_en=""
             IFS="$SEP" read -r _ title_en desc_en < <(awk -F "$SEP" -v id="$id" '$1 == id { print; exit }' "$en_text") || true
@@ -279,6 +282,7 @@ if [ "$XMP" = 1 ] && [ -s "$en_text" ] && [ -f "$work_dir/dates.txt" ]; then
                 mv -f "$fill_dir/filled.jpg" "$path"
             else
                 echo "warning: could not add English text to $path" >&2
+                failed=1
             fi
             rm -rf "$fill_dir"
             fill_dir=""

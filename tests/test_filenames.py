@@ -8,8 +8,8 @@ class CollectionTests(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory();self.base=pathlib.Path(self.tmp.name);self.root=self.base/'library';self.root.mkdir();self.archive=self.root/'Archived';self.archive.mkdir()
   self.env={**os.environ,'BING_CONFIG':str(self.base/'absent'),'BING_FILENAME_LANGUAGE':'en','BING_FILENAME_CREDIT':'0'}
  def tearDown(self):self.tmp.cleanup()
- def runkit(self,*args,ok=True):
-  r=subprocess.run([KIT,*map(str,args)],env=self.env,capture_output=True,text=True)
+ def runkit(self,*args,ok=True,cwd=None):
+  r=subprocess.run([KIT,*map(str,args)],env=self.env,cwd=cwd,capture_output=True,text=True)
   if ok:self.assertEqual(r.returncode,0,r.stderr)
   return r
  def image(self,path=None,**fields):
@@ -34,6 +34,41 @@ class CollectionTests(unittest.TestCase):
   self.runkit('restore',self.root,log);self.assertEqual(hashlib.sha256(p.read_bytes()).hexdigest(),h)
  def test_conflict_exclusive(self):
   p=self.image();q=self.root/'occupied.jpg';q.write_bytes(b'keep');self.assertNotEqual(self.runkit('move',p,q,ok=False).returncode,0);self.assertEqual(q.read_bytes(),b'keep');self.assertTrue(p.exists())
+ def test_restore_intact_prefix_after_torn_write(self):
+  p=self.image()
+  archived=self.image(self.archive/'2020-01-01 Old.jpg')
+  before={path:path.read_bytes() for path in (p,archived)}
+  log=self.base/'recovery.jsonl'
+  self.runkit('rename',self.root,'--apply',log)
+  # Simulate interruption in the last completion record, even within a UTF-8 character.
+  prefix=log.read_bytes().splitlines(keepends=True)[:-1]
+  log.write_bytes(b''.join(prefix)+b'{"completed":"\xe6\xb0')
+  r=self.runkit('restore',self.root,log,ok=False)
+  self.assertEqual(r.returncode,1,r.stderr)
+  for path,original in before.items():
+   self.assertTrue(path.exists(),path)
+   self.assertEqual(path.read_bytes(),original)
+  self.assertIn('trailing',r.stderr)
+ def test_apply_rejects_log_inside_collection(self):
+  p=self.image()
+  alias=self.base/'linked archive'
+  alias.symlink_to(self.archive)
+  for parent in (self.root,alias):
+   with self.subTest(parent=parent):
+    log=parent/'recovery.jsonl'
+    r=self.runkit('rename',self.root,'--apply',log,ok=False)
+    self.assertEqual(r.returncode,1,r.stderr)
+    self.assertFalse(log.exists())
+    self.assertTrue(p.exists())
+ def test_relative_collection_log_restores_from_other_directory(self):
+  p=self.image()
+  log=self.base/'recovery.jsonl'
+  self.runkit('rename',self.root.name,'--apply',log.name,cwd=self.base)
+  record=json.loads(log.read_text().splitlines()[0])
+  for key in ('source','target'):
+   self.assertTrue(pathlib.Path(record[key]).is_absolute(),record[key])
+  self.runkit('restore',self.root,log,cwd=self.archive)
+  self.assertTrue(p.exists())
  def test_missing_xmp_skipped(self):
   p=self.root/'2026-01-01 Raw © Author.jpg';shutil.copy(ROOT/'tests/pixel.jpg',p)
   # Strip inherited metadata by using a file deliberately unreadable as JPEG.
@@ -53,7 +88,10 @@ class CollectionTests(unittest.TestCase):
   self.env['BING_TEST_FILL_PATH']=str(self.base/'fill-path')
   wrapper='#!/bin/bash\nif [ "$2" = move ]; then printf "%s" "$3" > "$BING_TEST_MOVE_SOURCE"; fi\n'
   wrapper+='if [ "$2" = fill ]; then printf "%s" "$4" > "$BING_TEST_FILL_PATH"; fi\n'
-  if fail_command:
+  wrapper+='if [ "$2" = screens ]; then echo 1.52; exit 0; fi\n'
+  if fail_command=='caption':
+   wrapper+='if [ "$2" = caption ]; then printf partial > "$3/${4##*/}"; exit 1; fi\n'
+  elif fail_command:
    wrapper+=f'if [ "$2" = {fail_command} ]; then exit 1; fi\n'
   wrapper+=f'exec "{KIT}" "${{@:2}}"\n'
   for name,body in {'swift':wrapper,'xcrun':'#!/bin/bash\necho /usr/bin/swift\n'}.items():
@@ -61,8 +99,34 @@ class CollectionTests(unittest.TestCase):
   self.env['PATH']=str(bins)+':'+os.environ['PATH'];self.env['BING_ROTATION_DIR']=str(self.base/'rotation')
   return bins
  def test_failed_rotation_keeps_old(self):
-  self.image(self.archive/'2020-01-01 New.jpg');self.mocks("caption");out=self.base/'rotation';out.mkdir();old=out/'old.jpg';old.write_bytes(b'keep')
-  r=subprocess.run(['bash',str(ROOT/'rotation.sh'),str(self.root)],env=self.env,capture_output=True,text=True);self.assertNotEqual(r.returncode,0);self.assertEqual(old.read_bytes(),b'keep');self.assertFalse((self.root/'.bing-operation.lock').exists())
+  p=self.image(self.archive/'2020-01-01 New.jpg')
+  self.mocks('caption')
+  out=self.base/'rotation'
+  out.mkdir()
+  self.runkit('caption',out,p)
+  old=out/p.name
+  before=old.read_bytes()
+  stale=out/'old.jpg'
+  stale.write_bytes(b'previous selection')
+  r=self.rotation(self.root)
+  self.assertEqual(r.returncode,1,r.stderr)
+  self.assertEqual(old.read_bytes(),before)
+  self.assertEqual(stale.read_bytes(),b'previous selection')
+  self.assertFalse((self.root/'.bing-operation.lock').exists())
+ def test_caption_position_redraw(self):
+  p=self.image()
+  self.mocks()
+  out=self.base/'rotation'/p.name
+  self.env['BING_CAPTION_POSITION']='bottom-left'
+  self.assertEqual(self.rotation(self.root).returncode,0)
+  # A fresh copy stays cached until the effective side changes.
+  cached=out.stat().st_ino
+  self.env.pop('BING_CAPTION_POSITION')
+  self.assertEqual(self.rotation(self.root).returncode,0)
+  self.assertEqual(out.stat().st_ino,cached)
+  self.env['BING_CAPTION_POSITION']='bottom-right'
+  self.assertEqual(self.rotation(self.root).returncode,0)
+  self.assertNotEqual(out.stat().st_ino,cached)
  def test_invalid_config_no_writes(self):
   self.env['BING_FILENAME_LANGUAGE']='';r=subprocess.run(['bash',str(ROOT/'bing.sh'),str(self.root)],env=self.env,capture_output=True,text=True);self.assertEqual(r.returncode,2);self.assertEqual(list(self.root.iterdir()),[self.archive])
  def test_restore_rejects_changed_target(self):
@@ -124,6 +188,47 @@ else:
   self.assertFalse(list(self.root.glob('.bing-stage.*')))
  def test_download_english_default(self):
   self.assert_downloaded()
+ def test_download_collection_with_trailing_newline(self):
+  sibling=self.root
+  self.root=self.base/(sibling.name+'\n')
+  self.root.mkdir()
+  self.prepare_downloader()
+  r=self.run_download()
+  self.assertEqual(r.returncode,0,r.stderr)
+  self.assertEqual(list(sibling.iterdir()),[self.archive])
+  self.assertTrue((self.root/f'{self.day} English scene.jpg').exists())
+  self.assertEqual((self.root/'.bing-downloaded').read_text().splitlines(),[self.day])
+  self.archive=self.root/'Archived'
+  self.archive.mkdir()
+  self.assert_archived_backfill()
+ def test_migration_collection_with_trailing_newline(self):
+  intended=self.base/(self.root.name+'\n')
+  intended.mkdir()
+  wanted=self.image(intended/'2026-01-01 Old.jpg')
+  other=self.image()
+  self.mocks()
+  log=self.base/'recovery.jsonl'
+  for action in ('--apply','--restore'):
+   r=subprocess.run(['bash',ROOT/'rename.sh',intended,action,log],env=self.env,capture_output=True,text=True)
+   self.assertEqual(r.returncode,0,r.stderr)
+   self.assertTrue(other.exists())
+   self.assertEqual(wanted.exists(),action=='--restore')
+ def test_nonregular_date_matches_allow_download(self):
+  self.prepare_downloader()
+  (self.root/f'{self.day} Directory.jpg').mkdir()
+  (self.archive/f'{self.day} Link.jpg').symlink_to(ROOT/'tests/pixel.jpg')
+  (self.root/f'.{self.day} Link.jpg.icloud').symlink_to(ROOT/'tests/pixel.jpg')
+  r=self.run_download()
+  self.assertEqual(r.returncode,0,r.stderr)
+  self.assertTrue((self.root/f'{self.day} English scene.jpg').is_file())
+  self.assertEqual((self.root/'.bing-downloaded').read_text().splitlines(),[self.day])
+ def test_regular_placeholder_still_counts(self):
+  self.prepare_downloader()
+  (self.archive/f'.{self.day} Cloud.jpg.icloud').touch()
+  r=self.run_download()
+  self.assertEqual(r.returncode,0,r.stderr)
+  self.assertFalse(list(self.root.glob('*.jpg')))
+  self.assertEqual((self.root/'.bing-downloaded').read_text().splitlines(),[self.day])
  def assert_archived_backfill(self):
   day=datetime.date.today()-datetime.timedelta(days=1)
   self.env['BING_TEST_DAY']=day.strftime('%Y%m%d')
@@ -145,8 +250,17 @@ else:
   before=original.read_bytes()
   r=self.run_download()
   self.assertIn('could not add English text',r.stderr)
+  self.assertEqual(r.returncode,1,r.stderr)
   self.assertEqual(original.read_bytes(),before)
   self.assertEqual(list(self.archive.iterdir()),[original])
+ def test_failed_backfill_info_reports_failure(self):
+  self.prepare_downloader()
+  original=self.archive/f'{self.day} Existing.jpg'
+  original.write_bytes(b'bad jpeg')
+  r=self.run_download()
+  self.assertEqual(r.returncode,1,r.stderr)
+  self.assertIn(original.name,r.stderr)
+  self.assertEqual(original.read_bytes(),b'bad jpeg')
  @unittest.skipUnless(os.environ.get('BING_TEST_VOLUME'),'set BING_TEST_VOLUME to a writable directory on a second volume')
  def test_download_across_volumes(self):
   with tempfile.TemporaryDirectory(dir=os.environ['BING_TEST_VOLUME']) as folder:

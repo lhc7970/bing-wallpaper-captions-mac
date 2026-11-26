@@ -50,14 +50,14 @@ load_config() {
 }
 
 # The collection folder: argument > BING_WALLPAPER_DIR > iCloud Drive/Bing_Wallpaper.
-# Prints it, or fails when there is no iCloud Drive to default to.
+# End with a slash so command substitution preserves trailing newlines in the name.
 collection_dir() {
     if [ -n "${1:-}" ]; then
-        printf '%s' "$1"
+        printf '%s/' "$1"
     elif [ -n "${BING_WALLPAPER_DIR:-}" ]; then
-        printf '%s' "$BING_WALLPAPER_DIR"
+        printf '%s/' "$BING_WALLPAPER_DIR"
     elif [ -d "$ICLOUD_DRIVE" ]; then
-        printf '%s' "$ICLOUD_DRIVE/Bing_Wallpaper"
+        printf '%s/' "$ICLOUD_DRIVE/Bing_Wallpaper"
     else
         echo "error: iCloud Drive not found; set BING_WALLPAPER_DIR (see README, Settings)" >&2
         return 1

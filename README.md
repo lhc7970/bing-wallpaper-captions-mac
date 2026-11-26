@@ -92,9 +92,10 @@ EOF
 
 ## How it behaves
 
-- **One image per date.** A date counts as present if any file starts with
-  it: `YYYY-MM-DD ….jpg`, an iCloud conflict copy `… 2.jpg`, or a placeholder
-  `.….jpg.icloud`. This also covers captions Bing edits after publishing.
+- **One image per date.** A regular file named `YYYY-MM-DD ….jpg`, including
+  an iCloud conflict copy `… 2.jpg`, or a regular placeholder file named
+  `.YYYY-MM-DD ….jpg.icloud` counts as present. Directories and symlinks are
+  ignored. This also covers captions Bing edits after publishing.
 - **Deleted images stay deleted.** `.bing-downloaded` in the collection folder
   lists the dates downloaded in the last 16 days. To get a deleted image back,
   remove its line while Bing still offers it.
@@ -117,10 +118,10 @@ EOF
   an existing file. It records the date only after publication succeeds or it
   finds an existing image for that date.
 - **The rotation folder is generated.** Copies that are still wanted are kept,
-  and are redrawn only when their original, the caption style or the screen
-  changes. The random older images are picked once per day: every run on the
-  same day keeps the same ones. Choose a folder outside the collection that
-  also does not contain the collection. Rotation checks existing directories
+  and are redrawn when their original, caption style, caption position or
+  narrowest screen aspect changes. With the same eligible older images and
+  settings, each run on the same day picks the same ones. Choose a folder
+  outside the collection that also does not contain it. Rotation checks existing directories
   for overlap before creating the output, including paths reached through a
   symlink or alternate capitalization. Do not keep your own files in that folder.
 - **System Settings may show missing thumbnails** for copies that were
@@ -132,8 +133,8 @@ Exit codes:
 
 - `bing.sh`: `0` ok (including nothing new) · `1` no collection folder (no
   iCloud Drive and no setting), the folder cannot be read, the image list
-  failed or has no images, or an image failed · `2` neither `plutil` nor `jq`
-  is available.
+  failed or has no images, or an image download or English backfill failed ·
+  `2` neither `plutil` nor `jq` is available.
 - `rotation.sh`: `0` ok · `1` no collection folder, a folder cannot be read,
   there are no images, or a caption failed · `2` `swift` is missing.
 
@@ -289,9 +290,12 @@ Preview existing names (no image writes):
 Migration stays in each image's current directory and changes paths only. Images
 with incomplete XMP are left unchanged and reported. Destination conflicts are
 skipped; exclusive rename never overwrites a destination. The log is written and
-flushed before each rename, so interruption between rename and completion logging
-can still be recovered. Keep the log until satisfied; restoration skips changed
-or occupied paths and reports them. Exit 1 means at least one failure/skip requiring
+flushed before each rename. New logs record absolute image paths, so you can
+restore from a different working directory. For an older log with relative
+paths, run restore from the directory where you ran apply. Restore reports an
+incomplete trailing record, checks the intact entries and returns exit 1.
+Keep the log until satisfied. Restoration skips changed or occupied paths
+and reports them. Exit 1 means at least one failure/skip requiring
 attention; exit 2 means invalid usage/configuration. Ordinary metadata fallback
 notices do not indicate a failed migration.
 
