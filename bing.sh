@@ -6,10 +6,11 @@
 # Folder: argument > $BING_WALLPAPER_DIR > config file > iCloud Drive/Bing_Wallpaper
 # (settings: config.sh and README)
 #
-# Needs only what macOS ships with: bash 3.2, curl, sed, plutil.
-# On Linux (no plutil) it falls back to jq.
-# With swift (Xcode Command Line Tools) it also writes the title, description,
-# credit, date, link and English text into each image as XMP (bingkit.swift).
+# macOS only. Needs bash 3.2, curl and sed.
+# JSON is parsed with plutil, or with jq when plutil is absent.
+# Swift (Xcode Command Line Tools) is required. It writes the title,
+# description, credit, date, link and English text into each image as XMP
+# (bingkit.swift) and the script checks that write. Without Swift it exits 2.
 
 set -euo pipefail
 

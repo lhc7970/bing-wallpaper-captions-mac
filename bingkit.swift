@@ -8,10 +8,11 @@
 //             bing:id bing:link bing:titleEn bing:descriptionEn
 //       Fields already in the file are kept.
 //   info <in.jpg>…
-//       Print one line per image: bing:id, TAB, 1 if bing:titleEn is set
-//       (else 0), TAB, the path. bing:id is empty for images without XMP.
+//       Print one line per image: bing:id, TAB, 1 when both bing:titleEn
+//       and bing:descriptionEn are non-empty after trimming (else 0), TAB,
+//       the path. bing:id is empty for images without XMP.
 //   caption <out-dir> <in.jpg>…
-//       Write a copy of each image with its caption drawn bottom right.
+//       Write a copy of each image with its caption drawn bottom left.
 //       Text comes from the XMP written by `tag`; images without it use
 //       their file name ("YYYY-MM-DD <description> © <credit>.jpg").
 //       BING_CAPTION_POSITION: bottom-left (default) or bottom-right.

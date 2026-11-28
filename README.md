@@ -87,8 +87,8 @@ EOF
 - The collection can live on another volume, including one with spaces in its
   name, for example `./bing.sh "/Volumes/Wallpaper SSD/Bing"`. Rotation also
   accepts a trailing slash on the collection path.
-- **No iCloud Drive** (for example on Linux): set `BING_WALLPAPER_DIR`, or the
-  scripts stop with a hint.
+- **No iCloud Drive:** set `BING_WALLPAPER_DIR`, or the scripts stop with a
+  hint. Downloads run on macOS and write each image's XMP with Swift.
 
 ## How it behaves
 
@@ -133,10 +133,14 @@ Exit codes:
 
 - `bing.sh`: `0` ok (including nothing new) · `1` no collection folder (no
   iCloud Drive and no setting), the folder cannot be read, the image list
-  failed or has no images, or an image download or English backfill failed ·
-  `2` neither `plutil` nor `jq` is available.
+  failed or has no images, or an image download or English backfill failed
+  (including an XMP write or readback failure, which publishes nothing for
+  that image) · `2` neither `plutil` nor `jq` is available, `swift` is
+  missing, or `BING_FILENAME_LANGUAGE` / `BING_FILENAME_CREDIT` is empty or
+  invalid.
 - `rotation.sh`: `0` ok · `1` no collection folder, a folder cannot be read,
-  there are no images, or a caption failed · `2` `swift` is missing.
+  there are no images, or a caption failed · `2` `swift` is missing, or
+  `BING_FILENAME_LANGUAGE` / `BING_FILENAME_CREDIT` is empty or invalid.
 
 The reasons behind these choices are in [docs/design.md](docs/design.md).
 
