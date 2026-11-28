@@ -40,6 +40,10 @@ Notable changes. Format based on
 - `bingkit.swift tag` no longer rejects a field whose value starts with a
   joining character such as U+200C (zero-width non-joiner); such an image was
   saved without XMP.
+- README, the `bing.sh` header and `docs/design.md` now match the macOS-only
+  downloader: Swift is required, the default file name is
+  `YYYY-MM-DD <English description>.jpg`, date checks include archive
+  directories, and exit 2 covers missing Swift and invalid filename settings.
 
 ## [0.1.0] - 2026-11-01
 

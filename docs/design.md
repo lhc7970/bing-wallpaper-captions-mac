@@ -54,6 +54,10 @@ the archive and the system temporary directory are on different volumes.
 An image is skipped if the folder already has **any** image of its date: a file
 named `YYYY-MM-DD ….jpg` or `.YYYY-MM-DD ….jpg.icloud`.
 
+**Note (2026-11-28).** The same date match includes a regular image or iCloud
+placeholder of that date in an immediate `archive`, `Archive`, `archived`, or
+`Archived` directory. See [Filename policy update](#filename-policy-update-issue-5).
+
 Matching the whole file name looked natural, but in a long-running collection
 of about 1,000 images, every duplicate came from it:
 
@@ -88,6 +92,13 @@ XMP is written by `bingkit.swift tag` through ImageIO **without re-encoding**:
 decoded pixels stay identical and the file grows by a few KB. `osascript`
 cannot reach ImageIO, so this needs `swift` (Xcode Command Line Tools). Without
 it, only the file name is written.
+
+**Note (2026-11-28).** The file-name row and the two paragraphs above are the
+original design. Current downloads default to
+`YYYY-MM-DD <English description>.jpg`. `BING_FILENAME_CREDIT=1` adds the
+credit. `bing.sh` exits 2 when Swift is missing. When Swift cannot write and
+read back XMP, that image is not published, its date is not recorded, and the
+run exits 1. See [Filename policy update](#filename-policy-update-issue-5).
 
 | XMP field | Content |
 |-----------|---------|
@@ -361,15 +372,21 @@ pursue the helper. The rendered-copy workflow remains the available fallback.
 - **Favorites:** a Finder tag on an original adds it to every rotation.
 - **Other markets:** everything assumes `cn.bing.com` (Chinese text, with
   English through `ensearch=1`).
+- **Apple Photos:** import new images into an Apple Photos album (#7).
 
 
 ## Filename policy update (Issue #5)
 
-The filename layer is now `YYYY-MM-DD <selected description>[ <credit>].jpg`,
-defaulting to English without credit. The XMP table and namespace above do not
-change. Read README's “Filename settings and archives” for the current failure,
-archive, lock and migration contracts; it supersedes the old filename/fallback
-examples above. Rotation inventories immediate named archive folders, rejects
-ambiguous dates and never prunes old copies after generation or installation
-failure. `info` retains its three-column contract, but hasEn now means both English
-fields are present. `fields` exports JSON; `fill` updates missing English only.
+The filename layer is now `YYYY-MM-DD <selected description>[ <credit>].jpg`.
+The default is `YYYY-MM-DD <English description>.jpg` (English description, no
+credit). The XMP table and namespace above do not change. Read README's
+“Filename settings and archives” for the current failure, archive, lock and
+migration contracts; it supersedes the old filename and fallback examples
+above. A download treats a date as present in the collection root and in an
+immediate `archive`, `Archive`, `archived`, or `Archived` directory. `bing.sh`
+exits 2 when Swift is missing. When Swift cannot write and read back XMP, that
+image is not published, its date is not recorded, and the run exits 1.
+Rotation inventories immediate named archive folders, rejects ambiguous dates
+and never prunes old copies after generation or installation failure. `info`
+retains its three-column contract, but hasEn now means both English fields are
+present. `fields` exports JSON; `fill` updates missing English only.
